@@ -47,6 +47,29 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
     "closed": "Closed"
   };
 
+  function initials(name) {
+    var parts = String(name).trim().split(/\s+/);
+    return ((parts[0] || "?")[0] + (parts[1] ? parts[1][0] : "")).toUpperCase();
+  }
+
+  var AVATAR_COLORS = ["#00754a", "#1565c0", "#6a1b9a", "#b26a00", "#c2185b", "#00838f", "#5d4037", "#455a64"];
+
+  function avatarColor(name) {
+    var hash = 0;
+    for (var i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+    return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+  }
+
+  function dayLabel(iso) {
+    var d = new Date(iso);
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var day = new Date(d); day.setHours(0, 0, 0, 0);
+    var diff = Math.round((today - day) / 86400000);
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Yesterday";
+    return d.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+  }
+
   // ---------- extension ----------
 
   return {
@@ -302,7 +325,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
 
       function pickClick(e) {
-        if ($element[0].contains(e.target)) { stopPicking(); return; } // clicked back in panel = finish
+        if ($element[0].contains(e.target)) {           // clicked back in panel = finish
+          stopPicking();
+          // if it was the 🎯 button itself, swallow the click — otherwise its own
+          // handler fires next, sees picking==false, and restarts picking mode
+          if ($(e.target).closest(".qcol-pick").length) { e.preventDefault(); e.stopPropagation(); }
+          return;
+        }
         var hit = findObjectId(e.target);
         if (!hit) return; // clicked empty sheet area — stay in picking mode
         e.preventDefault();
@@ -463,9 +492,16 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
       self._stopRecording = stopRecording;
 
+      function voiceError(msg) {
+        var $box = $element.find(".qcol-pending");
+        $box.find(".qcol-voicerr").remove();
+        $box.append('<span class="qcol-chip qcol-voicerr">⚠ ' + esc(msg) + "</span>");
+        setTimeout(function () { $box.find(".qcol-voicerr").remove(); }, 6000);
+      }
+
       function startRecording() {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined") {
-          $element.find(".qcol-voice").prop("disabled", true).attr("title", "Microphone not available in this browser");
+          voiceError("No microphone support in this browser — try Chrome at localhost:4848/hub");
           return;
         }
         navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
@@ -484,8 +520,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           };
           rec.start();
           $element.find(".qcol-voice").addClass("qcol-recording").text("⏹");
-        }).catch(function () {
-          $element.find(".qcol-voice").attr("title", "Microphone access denied");
+        }).catch(function (err) {
+          console.error("qlik-collaboration: microphone error", err);
+          voiceError("Microphone blocked (" + (err && err.name) + ") — try Chrome at localhost:4848/hub");
         });
       }
 
@@ -525,7 +562,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         function one(c, isReply) {
           var own = c.author === me;
           var h = '<div class="qcol-item' + (isReply ? " qcol-reply" : "") + '" data-id="' + c.id + '">';
-          h += '<div class="qcol-meta"><b>' + esc(c.author) + "</b> <span>" + fmtTime(c.createdAt) + "</span>";
+          h += '<span class="qcol-avatar" style="background:' + avatarColor(c.author) + '">' + esc(initials(c.author)) + "</span>";
+          h += '<div class="qcol-msg">';
+          h += '<div class="qcol-meta"><b>' + esc(c.author) + '</b><span class="qcol-time">' + fmtTime(c.createdAt) + "</span>";
           if (!isReply) {
             h += '<span class="qcol-status qcol-status-' + esc(c.status) + '" data-id="' + c.id + '" title="Click to change status">' + (STATUS_LABELS[c.status] || c.status) + "</span>";
           }
@@ -542,12 +581,20 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           }
           if (!isReply) h += '<a href="#" class="qcol-doreply" data-id="' + c.id + '" data-author="' + esc(c.author) + '">reply</a>';
           if (own) h += '<a href="#" class="qcol-delete" data-id="' + c.id + '">delete</a>';
-          h += "</div></div>";
+          h += "</div></div></div>";
           return h;
         }
 
+        var lastDay = null;
         var html = roots.map(function (c) {
-          return one(c, false) + (byParent[c.id] || []).map(function (r) { return one(r, true); }).join("");
+          var block = "";
+          var day = dayLabel(c.createdAt);
+          if (day !== lastDay) {
+            lastDay = day;
+            block += '<div class="qcol-day"><span>' + esc(day) + "</span></div>";
+          }
+          block += one(c, false) + (byParent[c.id] || []).map(function (r) { return one(r, true); }).join("");
+          return block;
         }).join("");
 
         var stick = $list[0] && ($list[0].scrollHeight - $list[0].scrollTop - $list[0].clientHeight < 40);
