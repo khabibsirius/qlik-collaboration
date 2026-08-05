@@ -324,6 +324,11 @@
 .qcol-author { width: 100%; margin-bottom: 6px; }
 .qcol-author:focus, .qcol-attach:focus { outline: none; border-color: var(--qcol-green); }
 .qcol-author.qcol-invalid { border-color: #dc2626; }
+.qcol-author-locked {
+  background: #f1f3f5;
+  color: var(--qcol-muted);
+  cursor: default;
+}
 
 /* attach row: dropdown + click-to-pick button */
 .qcol-attachrow { display: flex; gap: 6px; margin-bottom: 6px; }

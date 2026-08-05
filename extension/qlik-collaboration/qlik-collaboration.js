@@ -182,6 +182,24 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       $author.val(localStorage.getItem("qlikCollab.author") || "");
 
+      // On Enterprise the user is already authenticated (AD via Qlik Proxy) —
+      // ask Qlik who they are and lock the name field to that identity.
+      // On Desktop this returns UserDirectory=Personal, so the field stays editable.
+      try {
+        app.global.getAuthenticatedUser().then(function (reply) {
+          var s = (reply && reply.qReturn) || "";
+          var uid = (s.match(/UserId=([^;]+)/i) || [])[1];
+          var dir = (s.match(/UserDirectory=([^;]+)/i) || [])[1];
+          if (uid && dir && dir.trim().toLowerCase() !== "personal") {
+            $author.val(uid.trim())
+              .prop("readonly", true)
+              .addClass("qcol-author-locked")
+              .attr("title", "Signed in via Qlik Sense: " + dir.trim() + "\\" + uid.trim());
+            refreshNotifs();
+          }
+        }).catch(function () { /* stay manual */ });
+      } catch (e) { /* older Capability API — stay manual */ }
+
       // ---------- selection tracking (Capability API) ----------
       self._selState = app.selectionState();
       self._currentSelections = [];
