@@ -1,0 +1,193 @@
+/* Qlik Collaboration — comments panel */
+
+.qcol-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family: "QlikView Sans", "Source Sans Pro", Arial, sans-serif;
+  font-size: 12px;
+  color: #333;
+  background: #fafafa;
+  border-left: 1px solid #e0e0e0;
+}
+
+/* header */
+.qcol-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: #fff;
+  border-bottom: 1px solid #e0e0e0;
+}
+.qcol-title { font-size: 14px; font-weight: 600; }
+.qcol-count { color: #888; font-weight: 400; }
+.qcol-conn { color: #ccc; font-size: 10px; }
+.qcol-conn.qcol-ok { color: #2e7d32; }
+.qcol-conn.qcol-err { color: #c62828; }
+
+/* current selections strip */
+.qcol-selections {
+  padding: 6px 10px;
+  background: #f0f4f8;
+  border-bottom: 1px solid #e0e0e0;
+  min-height: 18px;
+  line-height: 20px;
+}
+.qcol-nosel { color: #999; font-style: italic; }
+.qcol-chip {
+  display: inline-block;
+  background: #dbe7f3;
+  border-radius: 10px;
+  padding: 1px 8px;
+  margin: 1px 2px;
+  color: #23527c;
+}
+
+/* comments list */
+.qcol-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+.qcol-empty { color: #999; text-align: center; margin-top: 24px; }
+
+.qcol-item {
+  background: #fff;
+  border: 1px solid #e6e6e6;
+  border-radius: 6px;
+  padding: 7px 9px;
+  margin-bottom: 6px;
+}
+.qcol-reply { margin-left: 22px; background: #fcfcfc; }
+
+.qcol-meta { color: #888; margin-bottom: 3px; }
+.qcol-meta b { color: #444; margin-right: 6px; }
+.qcol-meta span { margin-right: 6px; }
+
+.qcol-status {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.qcol-status-new         { background: #e3f2fd; color: #1565c0; }
+.qcol-status-in_progress { background: #fff8e1; color: #b26a00; }
+.qcol-status-fixed       { background: #e8f5e9; color: #2e7d32; }
+.qcol-status-closed      { background: #eeeeee; color: #757575; }
+
+.qcol-objtag { cursor: help; }
+
+.qcol-body { white-space: pre-wrap; word-break: break-word; margin: 2px 0 4px; }
+
+.qcol-actions a {
+  color: #888;
+  margin-right: 10px;
+  text-decoration: none;
+  font-size: 11px;
+}
+.qcol-actions a:hover { color: #333; text-decoration: underline; }
+.qcol-applysel { color: #23527c !important; }
+.qcol-delete:hover { color: #c62828 !important; }
+
+/* compose area */
+.qcol-compose {
+  padding: 8px 10px;
+  background: #fff;
+  border-top: 1px solid #e0e0e0;
+}
+.qcol-replybar {
+  background: #f0f4f8;
+  padding: 3px 8px;
+  border-radius: 4px;
+  margin-bottom: 5px;
+  color: #555;
+}
+.qcol-cancelreply { float: right; color: #999; text-decoration: none; font-weight: bold; }
+
+.qcol-author, .qcol-attach {
+  box-sizing: border-box;
+  border: 1px solid #d5d5d5;
+  border-radius: 4px;
+  padding: 4px 6px;
+  background: #fff;
+  font-size: 12px;
+}
+.qcol-author { width: 100%; margin-bottom: 5px; }
+.qcol-author.qcol-invalid { border-color: #c62828; }
+
+/* attach row: dropdown + click-to-pick button */
+.qcol-attachrow { display: flex; gap: 5px; margin-bottom: 5px; }
+.qcol-attach { flex: 1; min-width: 0; }
+.qcol-pick {
+  border: 1px solid #d5d5d5;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: 13px;
+}
+.qcol-pick:hover { border-color: #009845; }
+.qcol-pick.qcol-picking { background: #009845; border-color: #009845; }
+.qcol-pickhint {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-radius: 4px;
+  padding: 3px 8px;
+  margin-bottom: 5px;
+}
+
+/* applied to the Qlik chart cell being hovered/chosen in picking mode */
+.qcol-pick-highlight {
+  outline: 3px solid #009845 !important;
+  outline-offset: -3px;
+  cursor: crosshair !important;
+}
+.qcol-pick-hover {
+  outline: 3px dashed #009845 !important;
+  outline-offset: -3px;
+  cursor: crosshair !important;
+}
+
+/* chips of attached charts under the dropdown */
+.qcol-attachchips { margin-bottom: 5px; line-height: 20px; }
+.qcol-chip-sheet { background: #eeeeee; color: #757575; }
+.qcol-chip-obj { background: #e8f5e9; color: #2e7d32; }
+.qcol-chip-x {
+  color: #2e7d32;
+  text-decoration: none;
+  font-weight: bold;
+  margin-left: 2px;
+}
+.qcol-chip-x:hover { color: #c62828; }
+
+.qcol-withsel { display: block; color: #777; margin: 0 0 5px; cursor: pointer; }
+.qcol-withsel input { vertical-align: middle; margin-right: 4px; }
+
+.qcol-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d5d5d5;
+  border-radius: 4px;
+  padding: 6px;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.qcol-input:focus { outline: none; border-color: #4a90d9; }
+
+.qcol-send {
+  width: 100%;
+  background: #009845;   /* Qlik green */
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 7px 0;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.qcol-send:hover { background: #007d39; }
