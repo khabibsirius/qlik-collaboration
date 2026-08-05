@@ -113,15 +113,46 @@
   }
   .filters button:hover { border-color: var(--brand); }
   .filters button.on { background: var(--brand); border-color: var(--brand); color: #fff; }
-  .filters select {
+  /* ---------- searchable dropdown ----------
+     A native <select> is fine for five options and unusable for a hundred: no
+     typing, no filtering, just a long scroll. This is a button plus a popover
+     with a search box, which is the same interaction people already know from
+     every other picker. */
+  .combo { position: relative; }
+  .combo-btn {
+    display: flex; align-items: center; gap: 6px; max-width: 230px;
     border: 1px solid var(--hair); background: var(--card); color: var(--ink-2);
     border-radius: 20px; padding: 4px 10px; font: inherit; font-size: 12.5px;
-    cursor: pointer; max-width: 210px;
+    cursor: pointer;
   }
-  .filters select:hover { border-color: var(--brand); }
+  .combo-btn:hover { border-color: var(--brand); }
+  .combo-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .combo-caret { color: var(--muted); font-size: 9px; flex: none; }
   /* An active filter has to look active, or a narrowed list reads as
      "the comments are gone". */
-  .filters select.on { border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
+  .combo.on .combo-btn { border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
+
+  .combo-pop {
+    position: absolute; z-index: 40; top: calc(100% + 5px); left: 0; width: 268px;
+    background: var(--card); border: 1px solid var(--hair); border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .18); padding: 7px;
+  }
+  .combo-pop[hidden] { display: none; }
+  .combo-search {
+    width: 100%; border: 1px solid var(--hair); border-radius: 7px;
+    background: var(--page); color: var(--ink);
+    padding: 5px 9px; font: inherit; font-size: 12.5px; margin-bottom: 5px;
+  }
+  .combo-search:focus { outline: none; border-color: var(--brand); }
+  .combo-list { max-height: 260px; overflow-y: auto; }
+  .combo-opt {
+    padding: 5px 9px; border-radius: 6px; font-size: 12.5px; color: var(--ink-2);
+    cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .combo-opt:hover, .combo-opt.active { background: var(--page); color: var(--ink); }
+  .combo-opt.sel { color: var(--brand-ink); font-weight: 600; }
+  .combo-opt b { background: rgba(0, 152, 69, .18); font-weight: 700; border-radius: 2px; }
+  .combo-note { padding: 6px 9px; font-size: 11.5px; color: var(--muted); }
   #fClear {
     border: 0; background: none; color: var(--muted); padding: 2px 4px;
     font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline;
@@ -174,6 +205,7 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .bar-name em { color: var(--muted); font-style: normal; }
+  .bars-note { margin-top: 9px; font-size: 12px; color: var(--muted); }
   /* Track carries no fill of its own; the surface between segments is the 2px gap. */
   .bar-track { height: 14px; display: flex; gap: 2px; }
   .bar-seg { min-width: 3px; }
@@ -189,10 +221,28 @@
 
   /* ---------- thread list ---------- */
   .group-head {
-    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     margin: 20px 0 8px; font-size: 13px; font-weight: 600;
+    cursor: pointer; user-select: none;
   }
   .group-head .sheet { color: var(--muted); font-weight: 400; }
+  .grp-caret {
+    flex: none; width: 15px; color: var(--muted); font-size: 10px;
+    transition: transform .12s;
+  }
+  .group-head.collapsed .grp-caret { transform: rotate(-90deg); }
+  /* what is hidden, so a collapsed group is never mistaken for an empty one */
+  .grp-count {
+    font-weight: 400; font-size: 11.5px; color: var(--muted);
+    border: 1px solid var(--hair); border-radius: 20px; padding: 0 7px;
+  }
+  .group-head.collapsed .grp-count { color: var(--ink-2); border-color: var(--muted); }
+  .queue-head { display: flex; align-items: center; gap: 10px; }
+  .queue-head button {
+    border: 0; background: none; color: var(--muted); font: inherit; font-size: 11px;
+    letter-spacing: .3px; cursor: pointer; text-transform: none; text-decoration: underline;
+  }
+  .queue-head button:hover { color: var(--brand-ink); }
   .group-head a { color: var(--brand-ink); text-decoration: none; font-weight: 400; font-size: 12px; }
   .group-head a:hover { text-decoration: underline; }
 
@@ -262,9 +312,9 @@
       <button data-f="in_progress">In progress</button>
       <button data-f="fixed">Fixed</button>
       <button data-f="closed">Include closed</button>
-      <select id="fUser" title="Show only threads started by this person"></select>
-      <select id="fApp" title="Show only this Qlik app"></select>
-      <select id="fSheet" title="Show only this sheet"></select>
+      <div class="combo" id="cUser"></div>
+      <div class="combo" id="cApp"></div>
+      <div class="combo" id="cSheet"></div>
       <button id="fClear" style="display:none">clear</button>
     </div>
   </div>
@@ -279,7 +329,10 @@
   <div class="section-label">Open feedback by dashboard</div>
   <div class="panel" id="breakdown"></div>
 
-  <div class="section-label" id="listLabel">The queue</div>
+  <div class="section-label queue-head">
+    <span>The queue</span>
+    <button id="collapseAll" type="button">collapse all</button>
+  </div>
   <div id="list"></div>
 </div>
 
@@ -310,7 +363,15 @@
   var $ = function (id) { return document.getElementById(id); };
   var $list = $("list"), $count = $("count"), $conn = $("conn"), $err = $("err");
   var $kpis = $("kpis"), $breakdown = $("breakdown"), $tip = $("tip");
-  var $fUser = $("fUser"), $fApp = $("fApp"), $fSheet = $("fSheet"), $fClear = $("fClear");
+  var $fClear = $("fClear");
+  // group key -> true when its threads are folded away; remembered per person
+  var collapsed = {};
+  try { collapsed = JSON.parse(localStorage.getItem("qlikCollab.collapsed") || "{}") || {}; }
+  catch (e) { collapsed = {}; }
+  function saveCollapsed() {
+    try { localStorage.setItem("qlikCollab.collapsed", JSON.stringify(collapsed)); }
+    catch (e) { /* private mode - it just will not be remembered */ }
+  }
 
   function esc(s) {
     return String(s === null || s === undefined ? "" : s)
@@ -386,31 +447,127 @@
     });
     return out.sort(function (a, b) { return a.label.localeCompare(b.label); });
   }
-  function fillSelect(el, allLabel, options, current) {
-    var sig = options.map(function (o) { return o.value; }).join("");
-    if (el.getAttribute("data-sig") !== sig) {
-      el.setAttribute("data-sig", sig);
-      el.innerHTML = '<option value="">' + esc(allLabel) + " (" + options.length + ")</option>" +
-        options.map(function (o) {
-          return '<option value="' + esc(o.value) + '">' + esc(o.label) + "</option>";
-        }).join("");
+  // A native <select> is fine for five options and unusable for a hundred: no
+  // typing, no filtering, just a long scroll. Same contract as the select it
+  // replaces — setOptions returns the value that survived, so a choice whose data
+  // has gone falls back to "all" instead of filtering against something absent.
+  var openCombo = null;
+  var MAX_ROWS = 300;               // a hundred is fine; ten thousand must not render
+
+  function Combo(id, allLabel, onPick) {
+    var root = $(id);
+    root.innerHTML =
+      '<button class="combo-btn" type="button" aria-haspopup="listbox" aria-expanded="false">' +
+        '<span class="combo-label"></span><span class="combo-caret">▼</span></button>' +
+      '<div class="combo-pop" hidden>' +
+        '<input class="combo-search" type="text" placeholder="Search…" autocomplete="off" spellcheck="false"/>' +
+        '<div class="combo-list" role="listbox"></div></div>';
+
+    var btn = root.querySelector(".combo-btn"),
+        lab = root.querySelector(".combo-label"),
+        pop = root.querySelector(".combo-pop"),
+        search = root.querySelector(".combo-search"),
+        list = root.querySelector(".combo-list");
+    var options = [], value = "", shown = [], active = -1;
+
+    function allText() { return allLabel + " (" + options.length + ")"; }
+    function paint() {
+      var hit = null;
+      options.forEach(function (o) { if (o.value === value) hit = o; });
+      lab.textContent = hit ? hit.label : allText();
+      btn.title = lab.textContent;
+      root.classList.toggle("on", !!value);
     }
-    el.value = current;
-    if (el.value !== current) el.value = "";     // the choice is gone from the data
-    el.classList.toggle("on", !!el.value);
-    return el.value;
+    function mark(label, q) {
+      var i = q ? label.toLowerCase().indexOf(q) : -1;
+      if (i === -1) return esc(label);
+      return esc(label.slice(0, i)) + "<b>" + esc(label.slice(i, i + q.length)) + "</b>" +
+             esc(label.slice(i + q.length));
+    }
+    function renderList() {
+      var q = search.value.trim().toLowerCase();
+      shown = q ? options.filter(function (o) { return o.label.toLowerCase().indexOf(q) !== -1; }) : options;
+      var html = '<div class="combo-opt' + (value ? "" : " sel") + '" data-v="" role="option">' +
+                 esc(allText()) + "</div>";
+      html += shown.slice(0, MAX_ROWS).map(function (o, i) {
+        return '<div class="combo-opt' + (o.value === value ? " sel" : "") +
+               (i === active ? " active" : "") + '" data-v="' + esc(o.value) +
+               '" role="option" title="' + esc(o.label) + '">' + mark(o.label, q) + "</div>";
+      }).join("");
+      if (!shown.length) html += '<div class="combo-note">Nothing matches “' + esc(search.value.trim()) + "”</div>";
+      else if (shown.length > MAX_ROWS)
+        html += '<div class="combo-note">' + (shown.length - MAX_ROWS) + " more — keep typing to narrow</div>";
+      list.innerHTML = html;
+      var act = list.querySelector(".combo-opt.active");
+      if (act) act.scrollIntoView({ block: "nearest" });
+    }
+    function open() {
+      if (openCombo) openCombo();          // only one popover at a time
+      openCombo = close;
+      pop.hidden = false;
+      btn.setAttribute("aria-expanded", "true");
+      search.value = ""; active = -1;
+      renderList();
+      search.focus();
+    }
+    function close() {
+      pop.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+      if (openCombo === close) openCombo = null;
+    }
+    function pick(v) { value = v; paint(); close(); onPick(); }
+
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (pop.hidden) open(); else close();
+    });
+    root.addEventListener("click", function (e) { e.stopPropagation(); });
+    search.addEventListener("input", function () { active = -1; renderList(); });
+    search.addEventListener("keydown", function (e) {
+      var n = Math.min(shown.length, MAX_ROWS);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (!n) return;
+        active = e.key === "ArrowDown" ? (active + 1) % n : (active <= 0 ? n - 1 : active - 1);
+        renderList();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (active >= 0 && shown[active]) pick(shown[active].value);
+        else if (n === 1) pick(shown[0].value);        // one match left: just take it
+      } else if (e.key === "Escape") {
+        e.preventDefault(); close(); btn.focus();
+      }
+    });
+    list.addEventListener("click", function (e) {
+      var opt = e.target.closest(".combo-opt");
+      if (opt) pick(opt.getAttribute("data-v"));
+    });
+
+    return {
+      setOptions: function (opts, current) {
+        options = opts;
+        value = (current && opts.some(function (o) { return o.value === current; })) ? current : "";
+        paint();
+        if (!pop.hidden) renderList();
+        return value;
+      },
+      get value() { return value; },
+      clear: function () { value = ""; paint(); }
+    };
   }
+  document.addEventListener("click", function () { if (openCombo) openCombo(); });
+
   function syncFilters() {
-    fUser = fillSelect($fUser, "All people",
+    fUser = cUser.setOptions(
       distinct(items, function (i) { return i.author; },
                       function (i) { return i.author; },
                       function (i) { return i.author; }), fUser);
-    fApp = fillSelect($fApp, "All apps",
+    fApp = cApp.setOptions(
       distinct(items, function (i) { return i.appId; },
                       function (i) { return i.appName; },
                       function (i) { return i.appId; }), fApp);
     var forSheets = fApp ? items.filter(function (i) { return i.appId === fApp; }) : items;
-    fSheet = fillSelect($fSheet, "All sheets",
+    fSheet = cSheet.setOptions(
       distinct(forSheets, sheetKey,
         function (i) { return i.sheetName ? (fApp ? i.sheetName : appLabel(i) + " › " + i.sheetName) : ""; },
         function (i) { return fApp ? i.sheetId : appLabel(i) + " › " + i.sheetId; }), fSheet);
@@ -473,8 +630,24 @@
       g.sheets[it.sheetId] = true;
     });
 
-    var max = order.reduce(function (m, k) { return Math.max(m, groups[k].total); }, 0);
     order.sort(function (a, b) { return groups[b].total - groups[a].total; });
+
+    // The question is "which dashboard is piling up", and past a handful of rows
+    // that answer is buried in a wall of near-identical bars that also pushes the
+    // queue off the screen. Show the leaders and account for the rest in a note.
+    //
+    // The remainder is deliberately NOT a bar. It is an aggregate of many
+    // dashboards, so its length is not comparable with a single one's - drawn as a
+    // bar it was both longer than the scale allowed (it overflowed the panel) and
+    // an invitation to read "Other" as the busiest dashboard.
+    var TOP = 8, tail = order.slice(TOP), tailTotal = 0;
+    if (tail.length > 1) {
+      tail.forEach(function (k) { tailTotal += groups[k].total; });
+      order = order.slice(0, TOP);
+    } else {
+      tail = [];
+    }
+    var max = order.reduce(function (m, k) { return Math.max(m, groups[k].total); }, 0) || 1;
 
     // Only the states actually on screen. A legend entry with no segment behind it
     // reads as "there is some Closed work somewhere" when the scope holds none.
@@ -500,7 +673,11 @@
              '<div class="bar-total">' + g.total + "</div>";
     }).join("");
 
-    $breakdown.innerHTML = legend + '<div class="bars">' + rows + "</div>";
+    var note = tail.length
+      ? '<div class="bars-note">and ' + tail.length + " more dashboards holding " + tailTotal +
+        (tailTotal === 1 ? " thread" : " threads") + " between them</div>"
+      : "";
+    $breakdown.innerHTML = legend + '<div class="bars">' + rows + "</div>" + note;
   }
 
   // ---- the list -----------------------------------------------------------
@@ -566,12 +743,21 @@
       if (!byKey[k].first.appName && it.appName) byKey[k].first = it;
     });
 
+    var anyOpen = groups.some(function (g) { return !collapsed[sheetKey(g.first)]; });
+    $("collapseAll").textContent = anyOpen ? "collapse all" : "expand all";
+
     $list.innerHTML = groups.map(function (g) {
-      var it = g.first, url = qlikUrl(it);
-      return '<div class="group-head"><span>' + esc(appLabel(it)) + "</span>" +
-             '<span class="sheet">› ' + esc(sheetLabel(it)) + "</span>" +
-             (url ? ' <a href="' + esc(url) + '" target="_blank" rel="noopener">open in Qlik ↗</a>' : "") +
-             "</div>" + g.items.map(one).join("");
+      var it = g.first, url = qlikUrl(it), key = sheetKey(it);
+      var shut = !!collapsed[key];
+      // The count rides the header so a folded group never looks like an empty one.
+      return '<div class="group-head' + (shut ? " collapsed" : "") + '" data-group="' + esc(key) + '">' +
+               '<span class="grp-caret">▼</span>' +
+               "<span>" + esc(appLabel(it)) + "</span>" +
+               '<span class="sheet">› ' + esc(sheetLabel(it)) + "</span>" +
+               '<span class="grp-count">' + g.items.length + "</span>" +
+               (url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">open in Qlik ↗</a>' : "") +
+             "</div>" +
+             (shut ? "" : g.items.map(one).join(""));
     }).join("");
   }
 
@@ -611,17 +797,35 @@
     if (tile) applyStatusFilter(tile.getAttribute("data-f"));
   });
 
+  // One control, both ways: it reads "expand all" once everything is folded.
+  $("collapseAll").addEventListener("click", function () {
+    var heads = $list.querySelectorAll(".group-head");
+    var anyOpen = Array.prototype.some.call(heads, function (h) {
+      return !collapsed[h.getAttribute("data-group")];
+    });
+    Array.prototype.forEach.call(heads, function (h) {
+      var k = h.getAttribute("data-group");
+      if (anyOpen) collapsed[k] = true; else delete collapsed[k];
+    });
+    saveCollapsed();
+    render();
+  });
+
   function onFilterChange() {
-    fUser = $fUser.value;
-    fApp = $fApp.value;
-    if (fApp && fSheet && fSheet.indexOf(fApp + "|") !== 0) fSheet = "";
-    else fSheet = $fSheet.value;
+    fUser = cUser.value;
+    fApp = cApp.value;
+    // a sheet chosen under a different app is meaningless once the app changes
+    fSheet = (fApp && cSheet.value.indexOf(fApp + "|") !== 0) ? "" : cSheet.value;
     render();
   }
-  $fUser.addEventListener("change", onFilterChange);
-  $fApp.addEventListener("change", onFilterChange);
-  $fSheet.addEventListener("change", onFilterChange);
-  $fClear.addEventListener("click", function () { fUser = fApp = fSheet = ""; render(); });
+  var cUser = Combo("cUser", "All people", onFilterChange);
+  var cApp = Combo("cApp", "All apps", onFilterChange);
+  var cSheet = Combo("cSheet", "All sheets", onFilterChange);
+  $fClear.addEventListener("click", function () {
+    fUser = fApp = fSheet = "";
+    cUser.clear(); cApp.clear(); cSheet.clear();
+    render();
+  });
 
   // per-segment hover: an HTML chart is interactive, so the mix is readable
   // without counting pixels
@@ -636,6 +840,16 @@
   });
 
   $list.addEventListener("click", function (e) {
+    // the "open in Qlik" link lives in the header and must not fold it
+    var head = e.target.closest(".group-head");
+    if (head && !e.target.closest("a")) {
+      var key = head.getAttribute("data-group");
+      if (collapsed[key]) delete collapsed[key]; else collapsed[key] = true;
+      saveCollapsed();
+      render();
+      return;
+    }
+
     var chip = e.target.closest("button.chip");
     if (chip) {
       var next = ORDER[(ORDER.indexOf(chip.getAttribute("data-status")) + 1) % ORDER.length];
