@@ -5,486 +5,654 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Qlik Collaboration — team inbox</title>
 <style>
+  /* ----------------------------------------------------------------------
+     Tokens. Surfaces, ink and gridlines from the validated reference
+     palette; Qlik green stays as the brand accent so this panel and the
+     extension read as one product.
+
+     Status colours are the reserved status palette, and are the same in
+     both modes by design. The mapping avoids putting `serious` next to
+     `warning`: those two measure normal-vision dE 13.6, under the 15 floor,
+     which no amount of labelling excuses. `new` therefore takes the
+     categorical blue instead, and the four segment colours that do end up
+     side by side clear both separation gates in both modes (CVD dE 10.7,
+     normal-vision 20.2).
+     ------------------------------------------------------------------- */
   :root {
-    --green: #009845;
-    --green-dark: #007d39;
-    --ink: #1f2937;
-    --muted: #6b7280;
-    --faint: #9ca3af;
-    --line: #e5e7eb;
-    --bg: #f4f6f8;
-    --card: #fff;
+    color-scheme: light;
+    --page: #f9f9f7;
+    --card: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --hair: rgba(11, 11, 11, .10);
+    --brand: #009845;
+    --brand-ink: #007d39;
+
+    --s-new: #2a78d6;
+    --s-progress: #fab219;
+    --s-fixed: #0ca30c;
+    --s-closed: #898781;
+    --s-critical: #d03b3b;
   }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --card: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --hair: rgba(255, 255, 255, .10);
+      --brand: #12b055;
+      --brand-ink: #35c46f;
+      --s-new: #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --card: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --hair: rgba(255, 255, 255, .10);
+    --brand: #12b055;
+    --brand-ink: #35c46f;
+    --s-new: #3987e5;
+  }
+
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    background: var(--bg);
+    background: var(--page);
     color: var(--ink);
-    font: 14px/1.5 "Segoe UI", -apple-system, Arial, sans-serif;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   }
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 0 20px 64px; }
 
+  /* ---------- header ---------- */
   header {
-    position: sticky; top: 0; z-index: 10;
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    padding: 12px 20px;
+    position: sticky; top: 0; z-index: 20;
     background: var(--card);
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--hair);
   }
-  h1 { margin: 0; font-size: 16px; font-weight: 600; }
-  h1 span { color: var(--faint); font-weight: 400; }
+  /* Two rows on purpose. One row could not hold the title, six pills, three
+     dropdowns and the status without wrapping, and a wrapped flex row puts the
+     connection state on a line of its own looking orphaned. */
+  .head-in {
+    max-width: 1160px; margin: 0 auto; padding: 10px 20px 0;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .head-filters { padding: 9px 20px 10px; }
+  h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .1px; }
+  h1 b { color: var(--muted); font-weight: 400; }
   .spacer { flex: 1; }
 
-  .filters { display: flex; gap: 6px; flex-wrap: wrap; }
+  .conn { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+  .conn::before { content: "● "; color: var(--muted); }
+  .conn.live::before { color: var(--s-fixed); }
+  .conn.down::before { color: var(--s-critical); }
+
+  .icon-btn {
+    border: 1px solid var(--hair); background: var(--card); color: var(--ink-2);
+    border-radius: 7px; width: 30px; height: 26px; cursor: pointer;
+    font-size: 13px; line-height: 1;
+  }
+  .icon-btn:hover { border-color: var(--brand); color: var(--brand-ink); }
+
+  /* ---------- filters: one row, above everything they affect ---------- */
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .filters button {
-    border: 1px solid var(--line);
-    background: var(--card);
-    border-radius: 20px;
-    padding: 4px 12px;
-    font: inherit; font-size: 12.5px;
-    color: var(--muted);
+    border: 1px solid var(--hair); background: var(--card); color: var(--ink-2);
+    border-radius: 20px; padding: 4px 12px; font: inherit; font-size: 12.5px;
     cursor: pointer;
   }
-  .filters button:hover { border-color: var(--green); }
-  .filters button.on { background: var(--green); border-color: var(--green); color: #fff; }
-
-  .selects { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  .selects select {
-    border: 1px solid var(--line);
-    background: var(--card);
-    border-radius: 20px;
-    padding: 4px 10px;
-    font: inherit; font-size: 12.5px;
-    color: var(--muted);
-    cursor: pointer;
-    max-width: 210px;
+  .filters button:hover { border-color: var(--brand); }
+  .filters button.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .filters select {
+    border: 1px solid var(--hair); background: var(--card); color: var(--ink-2);
+    border-radius: 20px; padding: 4px 10px; font: inherit; font-size: 12.5px;
+    cursor: pointer; max-width: 210px;
   }
-  .selects select:hover { border-color: var(--green); }
-  /* A filter that is on has to look on. Otherwise a narrowed list reads as
-     "the comments are gone" and the next question is why the tool lost them. */
-  .selects select.on {
-    border-color: var(--green);
-    color: var(--green-dark);
-    font-weight: 600;
-  }
-  .selects select:disabled { opacity: .55; cursor: default; }
+  .filters select:hover { border-color: var(--brand); }
+  /* An active filter has to look active, or a narrowed list reads as
+     "the comments are gone". */
+  .filters select.on { border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
   #fClear {
-    border: 0; background: none; padding: 2px 4px;
-    font: inherit; font-size: 12px; color: var(--muted);
-    cursor: pointer; text-decoration: underline;
+    border: 0; background: none; color: var(--muted); padding: 2px 4px;
+    font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline;
   }
-  #fClear:hover { color: #dc2626; }
+  #fClear:hover { color: var(--s-critical); }
 
-  .conn { font-size: 11.5px; color: var(--faint); white-space: nowrap; }
-  .conn.live::before { content: "● "; color: var(--green); }
-  .conn.down::before { content: "● "; color: #dc2626; }
+  /* ---------- overview ---------- */
+  .section-label {
+    font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+    color: var(--muted); margin: 22px 0 9px;
+  }
+  .kpis { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 10px; }
+  @media (max-width: 780px) { .kpis { grid-template-columns: 1fr 1fr; } }
 
-  main { padding: 16px 20px 60px; max-width: 1000px; margin: 0 auto; }
+  .tile {
+    background: var(--card); border: 1px solid var(--hair); border-radius: 10px;
+    padding: 12px 14px; text-align: left; font: inherit; color: inherit;
+    cursor: pointer; position: relative; overflow: hidden;
+  }
+  .tile:hover { border-color: var(--brand); }
+  .tile.on { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+  /* the state each tile stands for, as a bar down its left edge */
+  .tile::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--tile-accent, transparent);
+  }
+  .tile-label { font-size: 12px; color: var(--ink-2); }
+  /* Proportional figures: tabular-nums makes a big standalone number look loose. */
+  .tile-value { font-size: 26px; font-weight: 600; line-height: 1.15; margin-top: 2px; }
+  .tile-sub { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
 
+  /* the one hero figure on the page */
+  .tile.hero .tile-value { font-size: 48px; font-weight: 600; letter-spacing: -1px; }
+  .tile.hero .tile-sub { font-size: 12px; }
+
+  /* ---------- breakdown ---------- */
+  .panel {
+    background: var(--card); border: 1px solid var(--hair); border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+  .legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+  /* max-content lets short dashboard names hug their bars instead of leaving a
+     column of dead space; the cap stops a long .qvf path from squeezing the plot. */
+  .bars { display: grid; grid-template-columns: minmax(0, max-content) 1fr auto; gap: 7px 12px; align-items: center; }
+  .bar-name {
+    font-size: 12.5px; max-width: 230px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .bar-name em { color: var(--muted); font-style: normal; }
+  /* Track carries no fill of its own; the surface between segments is the 2px gap. */
+  .bar-track { height: 14px; display: flex; gap: 2px; }
+  .bar-seg { min-width: 3px; }
+  .bar-seg:last-child { border-radius: 0 4px 4px 0; }   /* rounded data-end, square baseline */
+  .bar-total { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+  #tip {
+    position: fixed; z-index: 60; pointer-events: none; display: none;
+    background: var(--ink); color: var(--page);
+    border-radius: 6px; padding: 5px 8px; font-size: 11.5px; white-space: nowrap;
+    box-shadow: 0 4px 14px rgba(0,0,0,.25);
+  }
+
+  /* ---------- thread list ---------- */
   .group-head {
-    display: flex; align-items: baseline; gap: 8px;
-    margin: 18px 0 8px;
-    font-size: 13px; font-weight: 600;
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    margin: 20px 0 8px; font-size: 13px; font-weight: 600;
   }
-  .group-head:first-child { margin-top: 0; }
-  .group-head a { color: var(--green); text-decoration: none; font-weight: 400; font-size: 12px; }
-  .group-head a:hover { text-decoration: underline; }
   .group-head .sheet { color: var(--muted); font-weight: 400; }
+  .group-head a { color: var(--brand-ink); text-decoration: none; font-weight: 400; font-size: 12px; }
+  .group-head a:hover { text-decoration: underline; }
 
   .item {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-left: 3px solid transparent;
-    border-radius: 8px;
-    padding: 10px 12px;
-    margin-bottom: 8px;
+    background: var(--card); border: 1px solid var(--hair);
+    border-left: 3px solid transparent; border-radius: 8px;
+    padding: 10px 13px; margin-bottom: 8px;
   }
-  /* Nobody has answered this yet — the whole reason the queue exists. */
-  .item.unanswered { border-left-color: #dc2626; }
+  .item.unanswered { border-left-color: var(--s-critical); }
 
-  .meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
-  .who { font-weight: 600; }
-  .when { color: var(--faint); font-size: 12px; }
-  .body { white-space: pre-wrap; word-break: break-word; margin-bottom: 6px; }
+  .meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 3px; }
+  .who { font-weight: 600; font-size: 13px; }
+  .when { color: var(--muted); font-size: 12px; }
+  .body { white-space: pre-wrap; word-break: break-word; margin-bottom: 7px; }
 
-  .status {
-    border: 0; border-radius: 10px;
-    padding: 2px 9px;
-    font: inherit; font-size: 10.5px; font-weight: 600;
-    text-transform: uppercase; letter-spacing: .4px;
-    cursor: pointer;
+  .chip {
+    border: 0; border-radius: 20px; padding: 2px 9px; font: inherit;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+    cursor: pointer; color: #fff;
   }
-  .status-new         { background: #e8f0fe; color: #1a5dc8; }
-  .status-in_progress { background: #fef3e2; color: #b26a00; }
-  .status-fixed       { background: #e6f6ec; color: #1e7e40; }
-  .status-closed      { background: #f1f3f5; color: #7b8794; }
+  .chip.s-new      { background: var(--s-new); }
+  .chip.s-progress { background: var(--s-progress); color: #3a2a00; }
+  .chip.s-fixed    { background: var(--s-fixed); }
+  .chip.s-closed   { background: var(--s-closed); }
+  .chip:hover { filter: brightness(.94); }
 
   .tag { font-size: 11.5px; color: var(--muted); }
-  .tag.none { color: #dc2626; font-weight: 600; }
+  /* the signal the queue exists for — never colour alone, always the words too */
+  .tag.waiting { color: var(--s-critical); font-weight: 600; }
 
   .actions { display: flex; gap: 12px; align-items: center; }
   .actions a, .actions button.link {
-    color: var(--muted); font-size: 12px; text-decoration: none;
-    background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit;
+    color: var(--muted); font-size: 12px; text-decoration: none; background: none;
+    border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 12px;
   }
   .actions a:hover, .actions button.link:hover { color: var(--ink); text-decoration: underline; }
-  .actions .open { color: var(--green); font-weight: 500; }
+  .actions .open { color: var(--brand-ink); font-weight: 500; }
 
-  .replies { margin: 8px 0 0; padding-left: 12px; border-left: 2px solid var(--line); }
+  .replies { margin: 8px 0 0; padding-left: 12px; border-left: 2px solid var(--grid); }
   .reply { padding: 4px 0; font-size: 13px; }
-  .reply .who { font-size: 13px; }
 
-  .empty { text-align: center; color: var(--faint); padding: 60px 20px; }
-  .empty strong { display: block; font-size: 16px; color: var(--muted); margin-bottom: 6px; }
-  .error { background: #fdecec; border: 1px solid #f5c2c2; color: #c02626;
-           border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  .empty { text-align: center; color: var(--muted); padding: 54px 20px; }
+  .empty strong { display: block; font-size: 16px; color: var(--ink-2); margin-bottom: 6px; }
+  .error {
+    background: #fdecec; border: 1px solid #f5c2c2; color: #a32020;
+    border-radius: 8px; padding: 10px 12px; margin: 14px 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .error { background: #2a1414; border-color: #5b2626; color: #f0a9a9; }
+  }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>Team inbox <span id="count"></span></h1>
-  <div class="filters">
-    <button data-f="all" class="on">All open</button>
-    <button data-f="unanswered">Needs a reply</button>
-    <button data-f="new">New</button>
-    <button data-f="in_progress">In progress</button>
-    <button data-f="fixed">Fixed</button>
-    <button data-f="closed">Include closed</button>
+  <div class="head-in">
+    <h1>Team inbox <b id="count"></b></h1>
+    <div class="spacer"></div>
+    <div class="conn" id="conn">connecting…</div>
+    <button class="icon-btn" id="theme" title="Light / dark">◐</button>
   </div>
-  <div class="selects">
-    <select id="fUser" title="Show only threads started by this person"></select>
-    <select id="fApp" title="Show only this Qlik app"></select>
-    <select id="fSheet" title="Show only this sheet"></select>
-    <button id="fClear" style="display:none">clear</button>
+  <div class="head-in head-filters">
+    <div class="filters" id="filters">
+      <button data-f="all" class="on">All open</button>
+      <button data-f="unanswered">Needs a reply</button>
+      <button data-f="new">New</button>
+      <button data-f="in_progress">In progress</button>
+      <button data-f="fixed">Fixed</button>
+      <button data-f="closed">Include closed</button>
+      <select id="fUser" title="Show only threads started by this person"></select>
+      <select id="fApp" title="Show only this Qlik app"></select>
+      <select id="fSheet" title="Show only this sheet"></select>
+      <button id="fClear" style="display:none">clear</button>
+    </div>
   </div>
-  <div class="spacer"></div>
-  <div class="conn" id="conn">connecting…</div>
 </header>
 
-<main>
+<div class="wrap">
   <div id="err" class="error" style="display:none"></div>
+
+  <div class="section-label">Where things stand</div>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="section-label">Open feedback by dashboard</div>
+  <div class="panel" id="breakdown"></div>
+
+  <div class="section-label" id="listLabel">The queue</div>
   <div id="list"></div>
-</main>
+</div>
+
+<div id="tip"></div>
 
 <script src="signalr.min.js"></script>
 <script>
 (function () {
   "use strict";
 
-  var STATUS_LABEL = { "new": "New", in_progress: "In progress", fixed: "Fixed", closed: "Closed" };
-  var STATUS_ORDER = ["new", "in_progress", "fixed", "closed"];
+  var STATUS = [
+    { key: "new",         label: "New",         cls: "s-new",      color: "--s-new" },
+    { key: "in_progress", label: "In progress", cls: "s-progress", color: "--s-progress" },
+    { key: "fixed",       label: "Fixed",       cls: "s-fixed",    color: "--s-fixed" },
+    { key: "closed",      label: "Closed",      cls: "s-closed",   color: "--s-closed" }
+  ];
+  var STATUS_BY = {};
+  STATUS.forEach(function (s) { STATUS_BY[s.key] = s; });
+  var ORDER = STATUS.map(function (s) { return s.key; });
 
   var qlikBaseUrl = "";
   var filter = "all";
-  var fUser = "", fApp = "", fSheet = "";   // "" means no restriction
+  var fUser = "", fApp = "", fSheet = "";
   var items = [];
-  var expanded = {};          // thread id -> replies array, once fetched
+  var expanded = {};
   var lastPayload = "";
 
-  var $list = document.getElementById("list");
-  var $count = document.getElementById("count");
-  var $conn = document.getElementById("conn");
-  var $err = document.getElementById("err");
+  var $ = function (id) { return document.getElementById(id); };
+  var $list = $("list"), $count = $("count"), $conn = $("conn"), $err = $("err");
+  var $kpis = $("kpis"), $breakdown = $("breakdown"), $tip = $("tip");
+  var $fUser = $("fUser"), $fApp = $("fApp"), $fSheet = $("fSheet"), $fClear = $("fClear");
 
   function esc(s) {
     return String(s === null || s === undefined ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
 
+  // ---- time ---------------------------------------------------------------
+  // Guarded at both ends: a row stamped by the backend can sit ahead of this
+  // machine's clock (different timezone, or a clock set back), and unguarded
+  // "days ago" arithmetic prints things like "-12 days ago".
+  function startOfDay(d) { var x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+  function daysSince(iso) {
+    return Math.round((startOfDay(new Date()) - startOfDay(new Date(iso))) / 86400000);
+  }
   function fmtTime(iso) {
-    var d = new Date(iso), now = new Date();
+    var d = new Date(iso);
     var hm = ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
-    var days = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 86400000);
+    var days = daysSince(iso);
     if (days === 0) return "today " + hm;
     if (days === 1) return "yesterday " + hm;
     if (days > 1 && days < 7) return days + " days ago";
-    // days < 0 means the comment is dated ahead of this machine's clock — a backend in
-    // another timezone, or a clock that has been set back. "days ago" was unguarded and
-    // printed "-12 days ago"; an absolute date is the honest answer when the two
-    // clocks disagree.
     return d.toLocaleDateString() + " " + hm;
   }
+  function waitedLabel(iso) {
+    var days = daysSince(iso);
+    if (days <= 0) return "waiting";                 // today, or clock skew
+    return "waiting " + days + (days === 1 ? " day" : " days");
+  }
 
-  // Same shape on Desktop and Enterprise; only the app id differs (a .qvf path
-  // there, a GUID here), and encoding covers both.
   function qlikUrl(it) {
     if (!qlikBaseUrl) return null;
     return qlikBaseUrl + "/sense/app/" + encodeURIComponent(it.appId) +
            "/sheet/" + encodeURIComponent(it.sheetId) + "/state/analysis";
   }
+  function appLabel(it) { return it.appName || it.appId; }
+  function sheetLabel(it) { return it.sheetName || it.sheetId; }
+  function sheetKey(it) { return it.appId + "|" + it.sheetId; }
+  function isWaiting(it) { return it.replyCount === 0 && it.status !== "closed"; }
 
-  function showError(msg) {
-    $err.textContent = msg;
-    $err.style.display = "";
-  }
+  function showError(msg) { $err.textContent = msg; $err.style.display = ""; }
   function clearError() { $err.style.display = "none"; }
 
-  function sheetKey(it) { return it.appId + "|" + it.sheetId; }
-
-  function matchesStatus(it) {
-    if (filter === "all") return it.status !== "closed";
-    if (filter === "closed") return true;              // "include closed" = everything
-    if (filter === "unanswered") return it.replyCount === 0 && it.status !== "closed";
-    return it.status === filter;
-  }
-
-  function matches(it) {
-    if (!matchesStatus(it)) return false;
+  // ---- filtering ----------------------------------------------------------
+  // The dropdowns scope the whole view. The status pills then drill into that
+  // scope, which is why the tiles and the chart are computed before the pill is
+  // applied: they are the thing the pill is a drill-down of.
+  function inScope(it) {
     if (fUser && it.author !== fUser) return false;
     if (fApp && it.appId !== fApp) return false;
     if (fSheet && sheetKey(it) !== fSheet) return false;
     return true;
   }
+  function matchesStatus(it) {
+    if (filter === "all") return it.status !== "closed";
+    if (filter === "closed") return true;
+    if (filter === "unanswered") return isWaiting(it);
+    return it.status === filter;
+  }
 
-  // ---- the three dropdowns -------------------------------------------------
-  // Everything the inbox draws is already in memory, so these filter the loaded
-  // set rather than asking the server again — no round trip, no spinner.
-
-  var $fUser = document.getElementById("fUser");
-  var $fApp = document.getElementById("fApp");
-  var $fSheet = document.getElementById("fSheet");
-  var $fClear = document.getElementById("fClear");
-
-  // nameOf may be empty on rows written before titles were captured, and the same
-  // app can have both kinds. Take the real title from whichever row has one instead
-  // of whichever row happens to come first, or the list offers a C:\...\data.qvf
-  // path while the name "data" sits in the next row down.
+  // ---- dropdowns ----------------------------------------------------------
   function distinct(list, keyOf, nameOf, fallbackOf) {
     var byKey = {}, out = [];
     list.forEach(function (it) {
       var k = keyOf(it);
       if (!k) return;
       var name = nameOf(it);
-      if (!byKey[k]) {
-        byKey[k] = { value: k, label: name || fallbackOf(it), named: !!name };
-        out.push(byKey[k]);
-      } else if (!byKey[k].named && name) {
-        byKey[k].label = name;
-        byKey[k].named = true;
-      }
+      if (!byKey[k]) { byKey[k] = { value: k, label: name || fallbackOf(it), named: !!name }; out.push(byKey[k]); }
+      else if (!byKey[k].named && name) { byKey[k].label = name; byKey[k].named = true; }
     });
     return out.sort(function (a, b) { return a.label.localeCompare(b.label); });
   }
-
-  // Repainting a <select> while it is open closes it under the cursor, so only
-  // rebuild when the available options have really changed.
   function fillSelect(el, allLabel, options, current) {
     var sig = options.map(function (o) { return o.value; }).join("");
     if (el.getAttribute("data-sig") !== sig) {
       el.setAttribute("data-sig", sig);
-      // Carry the count. With a single app in the data, choosing it removes nothing,
-      // and a dropdown that visibly does nothing reads as broken — "All apps (1)"
-      // answers that before anyone has to ask.
       el.innerHTML = '<option value="">' + esc(allLabel) + " (" + options.length + ")</option>" +
         options.map(function (o) {
           return '<option value="' + esc(o.value) + '">' + esc(o.label) + "</option>";
         }).join("");
     }
     el.value = current;
-    // The selection is gone from the data — a deleted comment, or an app filter
-    // that just excluded it. Falling back to "all" beats showing an empty list
-    // filtered by something that no longer exists.
-    if (el.value !== current) el.value = "";
+    if (el.value !== current) el.value = "";     // the choice is gone from the data
     el.classList.toggle("on", !!el.value);
     return el.value;
   }
-
   function syncFilters() {
-    // Built from everything loaded, not from the visible rows: narrowing by one
-    // dropdown must not remove the other choices from the other two.
     fUser = fillSelect($fUser, "All people",
       distinct(items, function (i) { return i.author; },
                       function (i) { return i.author; },
-                      function (i) { return i.author; }),
-      fUser);
-
+                      function (i) { return i.author; }), fUser);
     fApp = fillSelect($fApp, "All apps",
       distinct(items, function (i) { return i.appId; },
                       function (i) { return i.appName; },
-                      function (i) { return i.appId; }),
-      fApp);
-
-    // Sheets cascade from the app: two apps can both have a sheet called
-    // "Overview", so without the app the choice would be ambiguous. With no app
-    // chosen the label carries the app name to keep them apart.
+                      function (i) { return i.appId; }), fApp);
     var forSheets = fApp ? items.filter(function (i) { return i.appId === fApp; }) : items;
-    var appLabelOf = function (i) { return i.appName || i.appId; };
     fSheet = fillSelect($fSheet, "All sheets",
       distinct(forSheets, sheetKey,
-        function (i) {
-          if (!i.sheetName) return "";                       // let the fallback run
-          return fApp ? i.sheetName : appLabelOf(i) + " › " + i.sheetName;
-        },
-        function (i) {
-          return fApp ? i.sheetId : appLabelOf(i) + " › " + i.sheetId;
-        }),
-      fSheet);
-
+        function (i) { return i.sheetName ? (fApp ? i.sheetName : appLabel(i) + " › " + i.sheetName) : ""; },
+        function (i) { return fApp ? i.sheetId : appLabel(i) + " › " + i.sheetId; }), fSheet);
     $fClear.style.display = (fUser || fApp || fSheet) ? "" : "none";
   }
 
-  function onFilterChange() {
-    fUser = $fUser.value;
-    fApp = $fApp.value;
-    // Changing the app invalidates a sheet from a different one.
-    if (fSheet && fSheet.indexOf(fApp + "|") !== 0 && fApp) fSheet = "";
-    else fSheet = $fSheet.value;
-    render();
+  // ---- the numbers --------------------------------------------------------
+  function renderKpis(scoped) {
+    var waiting = scoped.filter(isWaiting);
+    var oldest = waiting.reduce(function (acc, it) {
+      var d = daysSince(it.createdAt);
+      return d > acc ? d : acc;
+    }, 0);
+    var counts = {};
+    scoped.forEach(function (it) { counts[it.status] = (counts[it.status] || 0) + 1; });
+
+    function tile(cls, f, accent, label, value, sub) {
+      return '<button class="tile' + (cls ? " " + cls : "") + (filter === f ? " on" : "") + '"' +
+             ' data-f="' + f + '" style="--tile-accent:' + accent + '">' +
+             '<div class="tile-label">' + esc(label) + "</div>" +
+             '<div class="tile-value">' + value + "</div>" +
+             '<div class="tile-sub">' + esc(sub) + "</div></button>";
+    }
+
+    // Age is the useful subline when there is an age to report. When every waiting
+    // thread dates from today — or from ahead of this clock — say something the data
+    // actually supports instead of asserting "all from today" off a skewed clock.
+    var boards = {};
+    waiting.forEach(function (it) { boards[it.appId] = true; });
+    var boardCount = Object.keys(boards).length;
+    var sub = waiting.length === 0
+      ? "everything has an answer"
+      : oldest > 0
+        ? "oldest has waited " + oldest + (oldest === 1 ? " day" : " days")
+        : "across " + boardCount + (boardCount === 1 ? " dashboard" : " dashboards");
+
+    $kpis.innerHTML =
+      tile("hero", "unanswered", "var(--s-critical)", "Needs a reply", waiting.length, sub) +
+      tile("", "new", "var(--s-new)", "New", counts["new"] || 0, "not picked up yet") +
+      tile("", "in_progress", "var(--s-progress)", "In progress", counts.in_progress || 0, "being worked on") +
+      tile("", "fixed", "var(--s-fixed)", "Fixed", counts.fixed || 0, "awaiting close");
   }
 
-  $fUser.addEventListener("change", onFilterChange);
-  $fApp.addEventListener("change", onFilterChange);
-  $fSheet.addEventListener("change", onFilterChange);
-  $fClear.addEventListener("click", function () {
-    fUser = fApp = fSheet = "";
-    render();
-  });
+  // Horizontal stacked bars: length compares dashboards, composition shows the
+  // mix. Segments are separated by a 2px gap in the surface colour rather than a
+  // stroke, and only the data-end is rounded.
+  function renderBreakdown(scoped) {
+    if (!scoped.length) {
+      $breakdown.innerHTML = '<div class="tag">Nothing in scope to summarise.</div>';
+      return;
+    }
+    var groups = {}, order = [];
+    scoped.forEach(function (it) {
+      var k = it.appId;
+      if (!groups[k]) { groups[k] = { label: appLabel(it), named: !!it.appName, total: 0, by: {}, sheets: {} }; order.push(k); }
+      var g = groups[k];
+      if (!g.named && it.appName) { g.label = it.appName; g.named = true; }
+      g.total++;
+      g.by[it.status] = (g.by[it.status] || 0) + 1;
+      g.sheets[it.sheetId] = true;
+    });
+
+    var max = order.reduce(function (m, k) { return Math.max(m, groups[k].total); }, 0);
+    order.sort(function (a, b) { return groups[b].total - groups[a].total; });
+
+    // Only the states actually on screen. A legend entry with no segment behind it
+    // reads as "there is some Closed work somewhere" when the scope holds none.
+    var present = {};
+    scoped.forEach(function (it) { present[it.status] = true; });
+    var legend = '<div class="legend">' + STATUS.filter(function (s) { return present[s.key]; })
+      .map(function (s) {
+        return "<span><i style='background:var(" + s.color + ")'></i>" + esc(s.label) + "</span>";
+      }).join("") + "</div>";
+
+    var rows = order.map(function (k) {
+      var g = groups[k];
+      var segs = STATUS.filter(function (s) { return g.by[s.key]; }).map(function (s) {
+        var n = g.by[s.key];
+        return '<div class="bar-seg" style="flex:' + n + ';background:var(' + s.color + ')"' +
+               ' data-tip="' + esc(g.label + " · " + s.label + ": " + n +
+                                  (n === 1 ? " thread" : " threads")) + '"></div>';
+      }).join("");
+      var sheetCount = Object.keys(g.sheets).length;
+      return '<div class="bar-name" title="' + esc(g.label) + '">' + esc(g.label) +
+               " <em>· " + sheetCount + (sheetCount === 1 ? " sheet" : " sheets") + "</em></div>" +
+             '<div class="bar-track" style="width:' + (g.total / max * 100).toFixed(1) + '%">' + segs + "</div>" +
+             '<div class="bar-total">' + g.total + "</div>";
+    }).join("");
+
+    $breakdown.innerHTML = legend + '<div class="bars">' + rows + "</div>";
+  }
+
+  // ---- the list -----------------------------------------------------------
+  function one(it) {
+    var url = qlikUrl(it);
+    var st = STATUS_BY[it.status] || STATUS_BY["new"];
+    var waiting = isWaiting(it);
+    var isOpen = Object.prototype.hasOwnProperty.call(expanded, it.id);
+
+    return '<div class="item' + (waiting ? " unanswered" : "") + '">' +
+      '<div class="meta">' +
+        '<span class="who">' + esc(it.author) + "</span>" +
+        '<span class="when">' + esc(fmtTime(it.createdAt)) + "</span>" +
+        '<button class="chip ' + st.cls + '" data-id="' + it.id + '" data-status="' + esc(it.status) +
+          '" title="Click to move it along">' + esc(st.label) + "</button>" +
+        (waiting
+          ? '<span class="tag waiting">' + esc(waitedLabel(it.createdAt)) + "</span>"
+          : '<span class="tag">' + it.replyCount + (it.replyCount === 1 ? " reply" : " replies") + "</span>") +
+      "</div>" +
+      '<div class="body">' + esc(it.body) + "</div>" +
+      '<div class="actions">' +
+        (url ? '<a class="open" href="' + esc(url) + '" target="_blank" rel="noopener">open the sheet ↗</a>' : "") +
+        (it.replyCount > 0
+          ? '<button class="link" data-toggle="' + it.id + '">' + (isOpen ? "hide replies" : "show replies") + "</button>"
+          : "") +
+      "</div>" +
+      (isOpen ? '<div class="replies">' + (expanded[it.id].length
+        ? expanded[it.id].map(function (r) {
+            return '<div class="reply"><span class="who">' + esc(r.author) + "</span> " +
+                   '<span class="when">' + esc(fmtTime(r.createdAt)) + "</span><br/>" + esc(r.body) + "</div>";
+          }).join("")
+        : '<div class="reply when">No replies.</div>') + "</div>" : "") +
+      "</div>";
+  }
 
   function render() {
-    syncFilters();          // may drop a selection whose data has gone, so filter after
-    var shown = items.filter(matches);
+    syncFilters();
+    var scoped = items.filter(inScope);
+    renderKpis(scoped);
+    renderBreakdown(scoped);
+
+    var shown = scoped.filter(matchesStatus);
     $count.textContent = "(" + shown.length + ")";
 
     if (!shown.length) {
-      // Name the filters that are hiding things. "Nothing here" while three
-      // dropdowns are quietly set is how people conclude the data was lost.
       var narrowed = [];
       if (fUser) narrowed.push("person");
       if (fApp) narrowed.push("app");
       if (fSheet) narrowed.push("sheet");
       $list.innerHTML = '<div class="empty"><strong>Nothing here</strong>' +
         (narrowed.length
-          ? "No threads match the " + narrowed.join(" and ") + " filter" +
-            (narrowed.length > 1 ? "s" : "") + " you have set."
-          : filter === "all"
-            ? "Every comment has been closed."
-            : "No threads match this filter.") +
-        "</div>";
+          ? "No threads match the " + narrowed.join(" and ") + " filter" + (narrowed.length > 1 ? "s" : "") + " you have set."
+          : filter === "all" ? "Every comment has been closed."
+                             : "No threads match this filter.") + "</div>";
       return;
     }
 
-    // Group by dashboard + sheet: the team thinks in dashboards, not in comment ids.
-    var groups = [];
-    var byKey = {};
+    var groups = [], byKey = {};
     shown.forEach(function (it) {
-      var key = it.appId + "|" + it.sheetId;
-      if (!byKey[key]) { byKey[key] = { key: key, first: it, items: [] }; groups.push(byKey[key]); }
-      byKey[key].items.push(it);
-      // Same reason as the dropdowns: prefer the row that actually carries titles,
-      // so a group is not headed by a .qvf path when a name exists further down.
-      if (!byKey[key].first.appName && it.appName) byKey[key].first = it;
+      var k = sheetKey(it);
+      if (!byKey[k]) { byKey[k] = { first: it, items: [] }; groups.push(byKey[k]); }
+      byKey[k].items.push(it);
+      if (!byKey[k].first.appName && it.appName) byKey[k].first = it;
     });
 
     $list.innerHTML = groups.map(function (g) {
-      var it = g.first;
-      var url = qlikUrl(it);
-      var appLabel = it.appName || it.appId;
-      var sheetLabel = it.sheetName || it.sheetId;
-      return '<div class="group-head">' +
-               "<span>" + esc(appLabel) + '</span><span class="sheet">› ' + esc(sheetLabel) + "</span>" +
-               (url ? ' <a href="' + esc(url) + '" target="_blank" rel="noopener">open in Qlik ↗</a>' : "") +
-             "</div>" +
-             g.items.map(one).join("");
+      var it = g.first, url = qlikUrl(it);
+      return '<div class="group-head"><span>' + esc(appLabel(it)) + "</span>" +
+             '<span class="sheet">› ' + esc(sheetLabel(it)) + "</span>" +
+             (url ? ' <a href="' + esc(url) + '" target="_blank" rel="noopener">open in Qlik ↗</a>' : "") +
+             "</div>" + g.items.map(one).join("");
     }).join("");
   }
 
-  function one(it) {
-    var url = qlikUrl(it);
-    var reply = it.replyCount === 0
-      ? '<span class="tag none">no reply yet</span>'
-      : '<span class="tag">' + it.replyCount + (it.replyCount === 1 ? " reply" : " replies") + "</span>";
-    var isOpen = Object.prototype.hasOwnProperty.call(expanded, it.id);
-
-    var h = '<div class="item' + (it.replyCount === 0 && it.status !== "closed" ? " unanswered" : "") + '">' +
-      '<div class="meta">' +
-        '<span class="who">' + esc(it.author) + "</span>" +
-        '<span class="when">' + esc(fmtTime(it.createdAt)) + "</span>" +
-        '<button class="status status-' + esc(it.status) + '" data-id="' + it.id +
-          '" data-status="' + esc(it.status) + '" title="Click to move it along">' +
-          esc(STATUS_LABEL[it.status] || it.status) + "</button>" +
-        reply +
-      "</div>" +
-      '<div class="body">' + esc(it.body) + "</div>" +
-      '<div class="actions">' +
-        (url ? '<a class="open" href="' + esc(url) + '" target="_blank" rel="noopener">open the sheet ↗</a>' : "") +
-        (it.replyCount > 0
-          ? '<button class="link" data-toggle="' + it.id + '">' +
-              (isOpen ? "hide replies" : "show replies") + "</button>"
-          : "") +
-      "</div>";
-
-    if (isOpen) {
-      var rs = expanded[it.id];
-      h += '<div class="replies">' + (rs.length
-        ? rs.map(function (r) {
-            return '<div class="reply"><span class="who">' + esc(r.author) + "</span> " +
-                   '<span class="when">' + esc(fmtTime(r.createdAt)) + "</span><br/>" +
-                   esc(r.body) + "</div>";
-          }).join("")
-        : '<div class="reply when">No replies.</div>') + "</div>";
-    }
-    return h + "</div>";
-  }
-
+  // ---- data ---------------------------------------------------------------
   function load() {
-    var includeClosed = (filter === "closed");
-    fetch("api/inbox?includeClosed=" + includeClosed)
+    fetch("api/inbox?includeClosed=" + (filter === "closed"))
       .then(function (r) { if (!r.ok) throw new Error("server answered " + r.status); return r.json(); })
       .then(function (data) {
         clearError();
-        // Re-rendering on every poll would collapse an expanded thread under the
-        // reader's cursor, so only redraw when something actually changed.
         var payload = JSON.stringify(data);
-        if (payload === lastPayload) return;
+        if (payload === lastPayload) return;    // never redraw an expanded thread away
         lastPayload = payload;
         items = data;
         render();
       })
       .catch(function (err) {
-        showError("Cannot load the inbox: " + (err && err.message) +
-                  ". Is the backend running?");
+        showError("Cannot load the inbox: " + (err && err.message) + ". Is the backend running?");
       });
   }
 
-  document.querySelector(".filters").addEventListener("click", function (e) {
-    var btn = e.target.closest("button[data-f]");
-    if (!btn) return;
-    filter = btn.getAttribute("data-f");
-    Array.prototype.forEach.call(this.querySelectorAll("button"), function (b) {
-      b.classList.toggle("on", b === btn);
+  // ---- events -------------------------------------------------------------
+  function applyStatusFilter(f) {
+    filter = f;
+    Array.prototype.forEach.call($("filters").querySelectorAll("button[data-f]"), function (b) {
+      b.classList.toggle("on", b.getAttribute("data-f") === f);
     });
-    lastPayload = "";       // the query itself changes for "include closed"
+    lastPayload = "";          // "include closed" changes the query itself
     load();
+  }
+
+  $("filters").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-f]");
+    if (btn) applyStatusFilter(btn.getAttribute("data-f"));
+  });
+  $kpis.addEventListener("click", function (e) {
+    var tile = e.target.closest(".tile[data-f]");
+    if (tile) applyStatusFilter(tile.getAttribute("data-f"));
+  });
+
+  function onFilterChange() {
+    fUser = $fUser.value;
+    fApp = $fApp.value;
+    if (fApp && fSheet && fSheet.indexOf(fApp + "|") !== 0) fSheet = "";
+    else fSheet = $fSheet.value;
+    render();
+  }
+  $fUser.addEventListener("change", onFilterChange);
+  $fApp.addEventListener("change", onFilterChange);
+  $fSheet.addEventListener("change", onFilterChange);
+  $fClear.addEventListener("click", function () { fUser = fApp = fSheet = ""; render(); });
+
+  // per-segment hover: an HTML chart is interactive, so the mix is readable
+  // without counting pixels
+  document.addEventListener("mousemove", function (e) {
+    var seg = e.target.closest ? e.target.closest("[data-tip]") : null;
+    if (!seg) { $tip.style.display = "none"; return; }
+    $tip.textContent = seg.getAttribute("data-tip");
+    $tip.style.display = "block";
+    var pad = 12;
+    $tip.style.left = Math.min(e.clientX + pad, window.innerWidth - $tip.offsetWidth - 6) + "px";
+    $tip.style.top = Math.max(6, e.clientY - $tip.offsetHeight - 8) + "px";
   });
 
   $list.addEventListener("click", function (e) {
-    var status = e.target.closest("button.status");
-    if (status) {
-      var current = status.getAttribute("data-status");
-      var next = STATUS_ORDER[(STATUS_ORDER.indexOf(current) + 1) % STATUS_ORDER.length];
-      fetch("api/comments/" + status.getAttribute("data-id") + "/status", {
+    var chip = e.target.closest("button.chip");
+    if (chip) {
+      var next = ORDER[(ORDER.indexOf(chip.getAttribute("data-status")) + 1) % ORDER.length];
+      fetch("api/comments/" + chip.getAttribute("data-id") + "/status", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: next })
       }).then(function (r) {
         if (!r.ok) throw new Error("server answered " + r.status);
-        lastPayload = "";
-        load();
-      }).catch(function (err) {
-        showError("Could not change the status: " + (err && err.message));
-      });
+        lastPayload = ""; load();
+      }).catch(function (err) { showError("Could not change the status: " + (err && err.message)); });
       return;
     }
-
     var toggle = e.target.closest("button[data-toggle]");
     if (toggle) {
       var id = toggle.getAttribute("data-toggle");
-      if (Object.prototype.hasOwnProperty.call(expanded, id)) {
-        delete expanded[id];
-        render();
-        return;
-      }
+      if (Object.prototype.hasOwnProperty.call(expanded, id)) { delete expanded[id]; render(); return; }
       fetch("api/inbox/" + id + "/replies")
         .then(function (r) { return r.json(); })
         .then(function (rs) { expanded[id] = rs || []; render(); })
@@ -492,54 +660,47 @@
     }
   });
 
-  // ---- live updates -------------------------------------------------------
-  // Same hub the Qlik panel uses. Polling stays as the safety net, slowed right
-  // down once the socket is up.
-  var pollMs = 10000;
+  // theme: remembered, and it must beat the OS setting in both directions
+  var $theme = $("theme");
+  try {
+    var saved = localStorage.getItem("qlikCollab.theme");
+    if (saved) document.documentElement.setAttribute("data-theme", saved);
+  } catch (e) { /* private mode */ }
+  $theme.addEventListener("click", function () {
+    var dark = document.documentElement.getAttribute("data-theme") === "dark" ||
+               (!document.documentElement.getAttribute("data-theme") &&
+                window.matchMedia("(prefers-color-scheme: dark)").matches);
+    var next = dark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("qlikCollab.theme", next); } catch (e) { /* noop */ }
+    render();      // segment colours are read from CSS vars
+  });
+
+  // ---- live ---------------------------------------------------------------
   var timer = null;
-  function setPoll(ms) {
-    if (timer) clearInterval(timer);
-    pollMs = ms;
-    timer = setInterval(load, ms);
-  }
+  function setPoll(ms) { if (timer) clearInterval(timer); timer = setInterval(load, ms); }
 
   function connect() {
     if (typeof signalR === "undefined") { $conn.textContent = "polling"; return; }
     try {
       var conn = new signalR.HubConnectionBuilder()
-        .withUrl("hubs/comments")
-        .withAutomaticReconnect()
-        .build();
+        .withUrl("hubs/comments").withAutomaticReconnect().build();
       conn.on("commentsChanged", load);
-      conn.onreconnected(function () {
-        $conn.className = "conn live"; $conn.textContent = "live"; load();
-      });
-      conn.onclose(function () {
-        $conn.className = "conn down"; $conn.textContent = "reconnecting…"; setPoll(10000);
-      });
+      conn.onreconnected(function () { $conn.className = "conn live"; $conn.textContent = "live"; load(); });
+      conn.onclose(function () { $conn.className = "conn down"; $conn.textContent = "reconnecting…"; setPoll(10000); });
       conn.start().then(function () {
-        $conn.className = "conn live";
-        $conn.textContent = "live";
-        setPoll(60000);
-      }).catch(function () {
-        $conn.className = "conn"; $conn.textContent = "polling";
-      });
-    } catch (e) {
-      $conn.className = "conn"; $conn.textContent = "polling";
-    }
+        $conn.className = "conn live"; $conn.textContent = "live"; setPoll(60000);
+      }).catch(function () { $conn.className = "conn"; $conn.textContent = "polling"; });
+    } catch (e) { $conn.className = "conn"; $conn.textContent = "polling"; }
   }
 
-  // The Qlik host differs per deployment, so ask the server before first render —
-  // otherwise every "open the sheet" link would point at the wrong machine.
+  // The Qlik host differs per deployment; ask before first render or every
+  // "open the sheet" link points at the wrong machine.
   fetch("api/config")
     .then(function (r) { return r.json(); })
     .then(function (c) { qlikBaseUrl = (c && c.qlikBaseUrl) || ""; })
     .catch(function () { /* links are simply omitted */ })
-    .then(function () {
-      load();
-      setPoll(10000);
-      connect();
-    });
+    .then(function () { load(); setPoll(10000); connect(); });
 })();
 </script>
 </body>
