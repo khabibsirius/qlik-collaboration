@@ -52,8 +52,39 @@ Soft delete; only succeeds if `author` matches (Desktop trust model — replaced
 
 Returns the updated comment.
 
-## Planned
+## GET /api/users
 
-- `POST /api/comments/{id}/attachments` — file upload (Etap 3)
-- `GET /api/notifications?user=` — mentions & replies (Etap 2)
-- SignalR hub `/hubs/comments` — real-time push replacing polling
+All known users (everyone who has commented) — feeds @mention autocomplete. Returns `["Ivan", "khabib"]`.
+
+## GET /api/notifications?user=
+
+Latest 50 notifications for a user (mentions + replies), newest first:
+
+```json
+[{ "id": 1, "kind": "mention", "isRead": false, "createdAt": "…", "commentId": 13,
+   "fromAuthor": "Ivan", "excerpt": "@khabib please check this", "appId": "…", "sheetId": "…" }]
+```
+
+## PUT /api/notifications/read?user=
+
+Marks all of the user's notifications as read. `204`.
+
+## POST /api/comments/{id}/attachments
+
+`multipart/form-data` with a `file` field. Max 25 MB. Allowed: pdf, xlsx, xls, docx, doc,
+pptx, csv, txt, png, jpg, jpeg, gif, webm, ogg, mp3, m4a, wav, zip. Voice messages are
+`.webm` audio attachments. Files stored on disk (`Storage:AttachmentsPath`, default
+`uploads/` next to the API), metadata in PostgreSQL.
+
+## GET /api/attachments/{id}
+
+Downloads the file (supports range requests, so `<audio>`/`<img>` can stream).
+
+## SignalR hub /hubs/comments
+
+Server → client events (connect with `skipNegotiation: true`, WebSocket transport):
+
+- `commentsChanged` `{appId, sheetId}` — anything changed on that sheet; clients re-fetch
+- `notify` `{username}` — that user has a new notification
+
+The extension keeps polling as a safety net: 3s without SignalR, 30s with it.

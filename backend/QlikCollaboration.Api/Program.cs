@@ -9,6 +9,7 @@ DefaultTypeMap.MatchNamesWithUnderscores = true;
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddSignalR();
 
 // Single pooled data source for the whole app
 builder.Services.AddSingleton(_ =>
@@ -26,5 +27,6 @@ app.UseSwagger();
 app.UseSwaggerUI();
 app.UseCors();
 app.MapControllers();
+app.MapHub<QlikCollaboration.Api.Hubs.CommentsHub>("/hubs/comments");
 
 app.Run("http://localhost:5000");

@@ -1,16 +1,21 @@
 /*
- * Qlik Collaboration — comments panel extension (MVP)
+ * Qlik Collaboration — comments panel extension
  *
  * Context detection (the "hard part"):
  *   - app id      : qlik.currApp(this).id
  *   - sheet id    : qlik.navigation.getCurrentSheetId()
  *   - selections  : app.selectionState() + OnData event  -> captured per comment
- *   - objects     : app.getObjectProperties(sheetId) -> properties.cells  -> attach picker
+ *   - objects     : app.getObjectProperties(sheetId) -> properties.cells
+ *                   + click-to-pick on the sheet (validated against known ids)
  *
- * Backend: REST API (ASP.NET Core), polled every N seconds. Real-time push
- * (SignalR) is a planned upgrade — the polling layer is isolated in refresh().
+ * Real-time: SignalR (bundled signalr.min.js) over WebSocket; the server
+ * broadcasts "commentsChanged" {appId, sheetId} and "notify" {username}.
+ * Polling stays as a safety net (3s without SignalR, 30s with it).
+ *
+ * Etap 2: @mentions with autocomplete + notification bell.
+ * Etap 3: file attachments; voice messages are audio attachments (MediaRecorder).
  */
-define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
+define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], function (qlik, $, signalR) {
   "use strict";
 
   // ---------- helpers ----------
@@ -27,6 +32,12 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
     var hm = ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
     if (d.toDateString() === now.toDateString()) return hm;
     return d.toLocaleDateString() + " " + hm;
+  }
+
+  function fmtSize(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   }
 
   var STATUS_LABELS = {
@@ -60,7 +71,7 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
                 },
                 pollSeconds: {
                   ref: "collab.pollSeconds",
-                  label: "Refresh interval (seconds)",
+                  label: "Fallback refresh interval (seconds)",
                   type: "number",
                   defaultValue: 3
                 }
@@ -89,7 +100,11 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
       self._app = app;
       self._replyTo = null;
       self._lastPayload = "";
-      self._attachTarget = ""; // "" = whole sheet
+      self._attachTargets = [];
+      self._pendingFiles = [];
+      self._users = [];
+      self._notifs = [];
+      self._live = false;
 
       var sheetInfo = qlik.navigation.getCurrentSheetId();
       self._sheetId = sheetInfo.success ? sheetInfo.sheetId : "unknown-sheet";
@@ -100,7 +115,14 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
         '<div class="qcol-panel">' +
         '  <div class="qcol-header">' +
         '    <span class="qcol-title">Comments <span class="qcol-count"></span></span>' +
-        '    <span class="qcol-conn" title="Backend connection">●</span>' +
+        '    <span class="qcol-headright">' +
+        '      <span class="qcol-bell" title="Notifications">🔔<span class="qcol-badge" style="display:none"></span></span>' +
+        '      <span class="qcol-conn" title="Backend connection">●</span>' +
+        '    </span>' +
+        '  </div>' +
+        '  <div class="qcol-notifs" style="display:none">' +
+        '    <div class="qcol-notifs-head">Notifications <a href="#" class="qcol-markread">mark all read</a></div>' +
+        '    <div class="qcol-notifs-list"></div>' +
         '  </div>' +
         '  <div class="qcol-selections" title="Current selections (captured with your comment)"></div>' +
         '  <div class="qcol-list"></div>' +
@@ -117,8 +139,15 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
         '    <div class="qcol-attachchips"></div>' +
         '    <div class="qcol-pickhint" style="display:none">Click charts to attach/detach… (Esc or 🎯 to finish)</div>' +
         '    <label class="qcol-withsel"><input type="checkbox" class="qcol-selcheck" checked/> attach current selections</label>' +
-        '    <textarea class="qcol-input" placeholder="Write a comment…" rows="2"></textarea>' +
-        '    <button class="qcol-send">Send</button>' +
+        '    <div class="qcol-mentionbox" style="display:none"></div>' +
+        '    <textarea class="qcol-input" placeholder="Write a comment… use @name to mention" rows="2"></textarea>' +
+        '    <div class="qcol-pending"></div>' +
+        '    <div class="qcol-toolbar">' +
+        '      <button class="qcol-filebtn" title="Attach files">📎</button>' +
+        '      <button class="qcol-voice" title="Record a voice message">🎤</button>' +
+        '      <input type="file" class="qcol-file" multiple style="display:none"/>' +
+        '      <button class="qcol-send">Send</button>' +
+        '    </div>' +
         '  </div>' +
         '</div>'
       );
@@ -154,10 +183,7 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
       onSel();
 
       // ---------- object picker (Etap 5, multi-select) ----------
-      // The official object list feeds both the dropdown and click-to-pick.
-      // Chosen charts are shown as removable chips; empty = whole sheet.
       self._cellsById = {};
-      self._attachTargets = [];
 
       function objLabel(id) {
         var c = self._cellsById[id];
@@ -212,13 +238,12 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
         removeTarget($(this).data("id"));
       });
 
-      // ---------- click-to-pick a chart on the sheet ----------
-      // Qlik has no public "clicked another object" event, so in picking mode we
-      // listen on the document (capture phase) and walk up from the clicked node
-      // until an ancestor carries an attribute containing one of the object ids
-      // we KNOW from getObjectProperties. Only known ids are ever accepted, so a
-      // Qlik markup change can only disable the shortcut, never mis-attach.
-      // The dropdown remains as the fallback.
+      // ---------- click-to-pick charts on the sheet ----------
+      // No public "clicked another object" event exists, so in picking mode we
+      // listen on the document (capture) and walk up from the clicked node until
+      // an ancestor attribute contains one of the ids we KNOW from
+      // getObjectProperties. Only known ids are accepted — a Qlik markup change
+      // can disable the shortcut but never mis-attach. Dropdown is the fallback.
 
       function findObjectId(el) {
         var ids = Object.keys(self._cellsById);
@@ -304,7 +329,188 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
         document.addEventListener("keydown", pickKey, true);
       });
 
+      // ---------- users & @mentions (Etap 2) ----------
+
+      function refreshUsers() {
+        fetch(self._apiUrl + "/api/users")
+          .then(function (r) { return r.json(); })
+          .then(function (list) { self._users = list || []; })
+          .catch(function () {});
+      }
+
+      function highlightMentions(escapedBody) {
+        var out = escapedBody;
+        self._users.slice().sort(function (a, b) { return b.length - a.length; }).forEach(function (u) {
+          var pattern = ("@" + esc(u)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          out = out.replace(new RegExp(pattern, "gi"), function (m) {
+            return '<span class="qcol-mention">' + m + "</span>";
+          });
+        });
+        return out;
+      }
+
+      function updateMentionBox() {
+        var ta = $input[0];
+        var uptoCaret = ta.value.substring(0, ta.selectionStart);
+        var m = uptoCaret.match(/@([^\s@]*)$/);
+        var $box = $element.find(".qcol-mentionbox");
+        if (!m) { $box.hide(); return; }
+        var frag = m[1].toLowerCase();
+        var me = ($author.val() || "").trim().toLowerCase();
+        var matches = self._users.filter(function (u) {
+          return u.toLowerCase().indexOf(frag) === 0 && u.toLowerCase() !== me;
+        }).slice(0, 6);
+        if (!matches.length) { $box.hide(); return; }
+        $box.html(matches.map(function (u) {
+          return '<a href="#" class="qcol-mentionopt" data-u="' + esc(u) + '">@' + esc(u) + "</a>";
+        }).join("")).show();
+      }
+
+      $element.on("input", ".qcol-input", updateMentionBox);
+      $element.on("click", ".qcol-mentionopt", function (e) {
+        e.preventDefault();
+        var u = $(this).data("u");
+        var ta = $input[0];
+        var uptoCaret = ta.value.substring(0, ta.selectionStart);
+        var rest = ta.value.substring(ta.selectionStart);
+        var newUpto = uptoCaret.replace(/@([^\s@]*)$/, "@" + u + " ");
+        $input.val(newUpto + rest);
+        $element.find(".qcol-mentionbox").hide();
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = newUpto.length;
+      });
+
+      // ---------- notifications (Etap 2) ----------
+
+      function refreshNotifs() {
+        var me = $author.val().trim();
+        if (!me) return;
+        fetch(self._apiUrl + "/api/notifications?user=" + encodeURIComponent(me))
+          .then(function (r) { return r.json(); })
+          .then(function (list) {
+            self._notifs = list || [];
+            var unread = self._notifs.filter(function (n) { return !n.isRead; }).length;
+            var $badge = $element.find(".qcol-badge");
+            if (unread > 0) $badge.text(unread).show(); else $badge.hide();
+            var KIND_ICON = { mention: "@", reply: "↩", status_change: "✎" };
+            $element.find(".qcol-notifs-list").html(
+              self._notifs.length
+                ? self._notifs.map(function (n) {
+                    return '<div class="qcol-notif' + (n.isRead ? "" : " qcol-notif-unread") + '">' +
+                           '<span class="qcol-notif-kind">' + (KIND_ICON[n.kind] || "•") + "</span>" +
+                           "<b>" + esc(n.fromAuthor) + "</b> " + esc(n.excerpt) +
+                           '<span class="qcol-notif-time">' + fmtTime(n.createdAt) + "</span></div>";
+                  }).join("")
+                : '<div class="qcol-empty">No notifications</div>'
+            );
+          })
+          .catch(function () {});
+      }
+
+      $element.on("click", ".qcol-bell", function () {
+        $element.find(".qcol-notifs").toggle();
+        refreshNotifs();
+      });
+
+      $element.on("click", ".qcol-markread", function (e) {
+        e.preventDefault();
+        var me = $author.val().trim();
+        if (!me) return;
+        fetch(self._apiUrl + "/api/notifications/read?user=" + encodeURIComponent(me), { method: "PUT" })
+          .then(refreshNotifs);
+      });
+
+      $element.on("change", ".qcol-author", refreshNotifs);
+
+      // ---------- attachments & voice (Etap 3) ----------
+
+      function renderPending() {
+        var $box = $element.find(".qcol-pending");
+        if (!self._pendingFiles.length) { $box.empty(); return; }
+        $box.html(self._pendingFiles.map(function (f, i) {
+          var icon = /\.webm$|\.ogg$|\.mp3$|\.m4a$|\.wav$/i.test(f.name) ? "🎤" : "📄";
+          return '<span class="qcol-chip qcol-chip-file">' + icon + " " + esc(f.name) +
+                 ' <a href="#" class="qcol-pending-x" data-i="' + i + '">×</a></span>';
+        }).join(" "));
+      }
+
+      $element.on("click", ".qcol-filebtn", function (e) {
+        e.preventDefault();
+        $element.find(".qcol-file").trigger("click");
+      });
+
+      $element.on("change", ".qcol-file", function () {
+        var files = this.files;
+        for (var i = 0; i < files.length; i++) {
+          self._pendingFiles.push({ file: files[i], name: files[i].name });
+        }
+        this.value = "";
+        renderPending();
+      });
+
+      $element.on("click", ".qcol-pending-x", function (e) {
+        e.preventDefault();
+        self._pendingFiles.splice(parseInt($(this).data("i"), 10), 1);
+        renderPending();
+      });
+
+      function stopRecording() {
+        if (self._recorder) {
+          try { self._recorder.stop(); } catch (err) { /* already stopped */ }
+          self._recorder = null;
+        }
+        $element.find(".qcol-voice").removeClass("qcol-recording").text("🎤");
+      }
+      self._stopRecording = stopRecording;
+
+      function startRecording() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined") {
+          $element.find(".qcol-voice").prop("disabled", true).attr("title", "Microphone not available in this browser");
+          return;
+        }
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+          var chunks = [];
+          var rec = new MediaRecorder(stream);
+          self._recorder = rec;
+          rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+          rec.onstop = function () {
+            stream.getTracks().forEach(function (t) { t.stop(); });
+            if (chunks.length) {
+              var blob = new Blob(chunks, { type: "audio/webm" });
+              var stamp = new Date().toISOString().replace(/[:.]/g, "-").substring(0, 19);
+              self._pendingFiles.push({ file: blob, name: "voice-" + stamp + ".webm" });
+              renderPending();
+            }
+          };
+          rec.start();
+          $element.find(".qcol-voice").addClass("qcol-recording").text("⏹");
+        }).catch(function () {
+          $element.find(".qcol-voice").attr("title", "Microphone access denied");
+        });
+      }
+
+      $element.on("click", ".qcol-voice", function (e) {
+        e.preventDefault();
+        if (self._recorder) stopRecording(); else startRecording();
+      });
+
       // ---------- rendering ----------
+
+      function renderAttachments(c) {
+        if (!c.attachments || !c.attachments.length) return "";
+        return '<div class="qcol-atts">' + c.attachments.map(function (a) {
+          var url = self._apiUrl + "/api/attachments/" + a.id;
+          if (/^image\//.test(a.contentType)) {
+            return '<a href="' + url + '" target="_blank"><img class="qcol-att-img" src="' + url + '" alt="' + esc(a.fileName) + '"/></a>';
+          }
+          if (/^audio\//.test(a.contentType) || /\.webm$/i.test(a.fileName)) {
+            return '<audio class="qcol-att-audio" controls preload="none" src="' + url + '"></audio>';
+          }
+          return '<a class="qcol-att-file" href="' + url + '" target="_blank">📄 ' + esc(a.fileName) +
+                 ' <span>(' + fmtSize(a.sizeBytes) + ")</span></a>";
+        }).join("") + "</div>";
+      }
+
       function render(comments) {
         var byParent = {};
         comments.forEach(function (c) {
@@ -328,7 +534,8 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
                  (c.objectIds.length > 1 ? "×" + c.objectIds.length : "") + "</span>";
           }
           h += "</div>";
-          h += '<div class="qcol-body">' + esc(c.body) + "</div>";
+          h += '<div class="qcol-body">' + highlightMentions(esc(c.body)) + "</div>";
+          h += renderAttachments(c);
           h += '<div class="qcol-actions">';
           if (c.selectionState && c.selectionState !== "null") {
             h += '<a href="#" class="qcol-applysel" data-sel="' + esc(c.selectionState) + '">📎 apply filters</a>';
@@ -349,6 +556,7 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
       }
 
       // ---------- data ----------
+
       function refresh() {
         var url = self._apiUrl + "/api/comments?appId=" + encodeURIComponent(self._appId) +
                   "&sheetId=" + encodeURIComponent(self._sheetId);
@@ -365,13 +573,27 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
           .catch(function () { $conn.addClass("qcol-err").removeClass("qcol-ok"); });
       }
 
+      function uploadPending(commentId) {
+        var uploads = self._pendingFiles.map(function (f) {
+          var fd = new FormData();
+          fd.append("file", f.file, f.name);
+          return fetch(self._apiUrl + "/api/comments/" + commentId + "/attachments", {
+            method: "POST",
+            body: fd
+          });
+        });
+        return Promise.all(uploads);
+      }
+
       function send() {
         var author = $author.val().trim();
         var body = $input.val().trim();
         if (!author) { $author.addClass("qcol-invalid"); return; }
-        if (!body) return;
+        if (!body && !self._pendingFiles.length) return;
+        if (!body) body = "🎤"; // voice/file-only message needs a body
         localStorage.setItem("qlikCollab.author", author);
         $author.removeClass("qcol-invalid");
+        stopRecording();
 
         var withSel = $element.find(".qcol-selcheck").prop("checked") && self._currentSelections.length > 0;
         fetch(self._apiUrl + "/api/comments", {
@@ -387,19 +609,26 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
             selectionState: withSel ? JSON.stringify(self._currentSelections) : null
           })
         }).then(function (r) {
-          if (r.ok) {
-            $input.val("");
-            self._replyTo = null;
-            self._attachTargets = [];
-            renderChips();
-            $element.find(".qcol-replybar").hide();
-            refresh();
-          }
-        });
+          if (!r.ok) throw new Error(r.status);
+          return r.json();
+        }).then(function (created) {
+          return uploadPending(created.id);
+        }).then(function () {
+          $input.val("");
+          self._replyTo = null;
+          self._attachTargets = [];
+          self._pendingFiles = [];
+          renderChips();
+          renderPending();
+          $element.find(".qcol-replybar").hide();
+          refreshUsers();
+          refresh();
+        }).catch(function () { /* connection dot already reflects errors */ });
       }
 
       // ---------- events ----------
-      $element.on("click", ".qcol-send", send);
+
+      $element.on("click", ".qcol-send", function (e) { e.preventDefault(); send(); });
       $element.on("keydown", ".qcol-input", function (e) {
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
       });
@@ -451,10 +680,49 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
         });
       });
 
-      // ---------- polling ----------
-      refresh();
+      // ---------- real-time (SignalR) with polling fallback ----------
+
+      function tick() { refresh(); refreshNotifs(); }
+
+      function connectHub() {
+        try {
+          var conn = new signalR.HubConnectionBuilder()
+            .withUrl(self._apiUrl + "/hubs/comments", {
+              skipNegotiation: true,
+              transport: signalR.HttpTransportType.WebSockets
+            })
+            .withAutomaticReconnect()
+            .build();
+
+          conn.on("commentsChanged", function (d) {
+            if (d && d.appId === self._appId && d.sheetId === self._sheetId) refresh();
+          });
+          conn.on("notify", function (d) {
+            var me = $author.val().trim();
+            if (d && me && d.username && d.username.toLowerCase() === me.toLowerCase()) refreshNotifs();
+          });
+
+          conn.onreconnected(function () { $conn.addClass("qcol-live"); tick(); });
+          conn.onclose(function () { $conn.removeClass("qcol-live"); });
+
+          conn.start().then(function () {
+            self._live = true;
+            $conn.addClass("qcol-live").attr("title", "Real-time connection active");
+            // SignalR delivers changes instantly — polling becomes a 30s safety net
+            if (self._timer) clearInterval(self._timer);
+            self._timer = setInterval(tick, 30000);
+          }).catch(function () { /* no hub — polling stays at the configured rate */ });
+
+          self._connection = conn;
+        } catch (err) { /* signalR lib unavailable — polling continues */ }
+      }
+
+      // ---------- start ----------
+      refreshUsers();
+      tick();
       if (self._timer) clearInterval(self._timer);
-      self._timer = setInterval(refresh, pollMs);
+      self._timer = setInterval(tick, pollMs);
+      connectHub();
 
       return qlik.Promise.resolve();
     },
@@ -462,6 +730,10 @@ define(["qlik", "jquery", "css!./qlik-collaboration.css"], function (qlik, $) {
     beforeDestroy: function () {
       if (this._timer) clearInterval(this._timer);
       if (this._stopPicking) this._stopPicking();
+      if (this._stopRecording) this._stopRecording();
+      if (this._connection) {
+        try { this._connection.stop(); } catch (e) { /* noop */ }
+      }
       if (this._selState && this._selState.OnData) {
         try { this._selState.OnData.unbind(); } catch (e) { /* noop */ }
       }

@@ -17,4 +17,6 @@ public class Comment
     public bool IsDeleted { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    /// <summary>Files attached to this comment (Etap 3); filled by a second query.</summary>
+    public List<Attachment> Attachments { get; set; } = [];
 }
