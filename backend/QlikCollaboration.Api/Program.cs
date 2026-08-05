@@ -3,6 +3,10 @@ using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Allows running as a Windows Service on the server (no-op when run normally):
+//   sc.exe create QlikCollaboration binPath= "...\QlikCollaboration.Api.exe"
+builder.Host.UseWindowsService();
+
 // Map snake_case DB columns (app_id) to PascalCase C# properties (AppId)
 DefaultTypeMap.MatchNamesWithUnderscores = true;
 
@@ -29,4 +33,7 @@ app.UseCors();
 app.MapControllers();
 app.MapHub<QlikCollaboration.Api.Hubs.CommentsHub>("/hubs/comments");
 
-app.Run("http://localhost:5000");
+// Listen address comes from appsettings.json "Urls" (or ASPNETCORE_URLS).
+// Dev default: http://localhost:5000. On a server: http://0.0.0.0:5000 or an
+// https binding — see docs/Enterprise.md.
+app.Run();
