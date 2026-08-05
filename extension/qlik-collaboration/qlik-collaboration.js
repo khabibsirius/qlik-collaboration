@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.11.1";
+  var EXT_VERSION = "0.11.2";
 
   function esc(text) {
     return String(text)
@@ -1194,7 +1194,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       function send() {
         var author = $author.val().trim();
         var body = $input.val().trim();
-        if (!author) { $author.addClass("qcol-invalid"); return; }
+        // A red border was the only feedback here, and in bubble mode the name field
+        // can be off screen above the composer — so Send appeared to do nothing at all.
+        if (!author) {
+          $author.addClass("qcol-invalid").show().focus();
+          toast("Type your name in the box above, then send.");
+          return;
+        }
         if (!body && !self._pendingFiles.length) return;
         if (!body) body = "🎤"; // voice/file-only message needs a body
         localStorage.setItem("qlikCollab.author", author);
