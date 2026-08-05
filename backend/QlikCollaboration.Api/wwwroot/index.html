@@ -198,8 +198,12 @@
     var days = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 86400000);
     if (days === 0) return "today " + hm;
     if (days === 1) return "yesterday " + hm;
-    if (days < 7) return days + " days ago";
-    return d.toLocaleDateString();
+    if (days > 1 && days < 7) return days + " days ago";
+    // days < 0 means the comment is dated ahead of this machine's clock — a backend in
+    // another timezone, or a clock that has been set back. "days ago" was unguarded and
+    // printed "-12 days ago"; an absolute date is the honest answer when the two
+    // clocks disagree.
+    return d.toLocaleDateString() + " " + hm;
   }
 
   // Same shape on Desktop and Enterprise; only the app id differs (a .qvf path
