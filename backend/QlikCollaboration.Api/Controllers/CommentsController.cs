@@ -26,13 +26,11 @@ public class CommentsController : ControllerBase
 
     private readonly NpgsqlDataSource _db;
     private readonly IHubContext<CommentsHub> _hub;
-    private readonly TeamRoster _team;
 
-    public CommentsController(NpgsqlDataSource db, IHubContext<CommentsHub> hub, TeamRoster team)
+    public CommentsController(NpgsqlDataSource db, IHubContext<CommentsHub> hub)
     {
         _db = db;
         _hub = hub;
-        _team = team;
     }
 
     private Task Broadcast(string appId, string sheetId) =>
@@ -80,9 +78,8 @@ public class CommentsController : ControllerBase
         // to prevent, so show nothing and let the panel ask again a moment later.
         if (string.IsNullOrWhiteSpace(user)) return [];
 
-        var isTeam = _team.IsTeamMember(user);
-
         await using var conn = await _db.OpenConnectionAsync();
+        var isTeam = UserRoles.SeesEverything(await UserRoles.Of(conn, user));
         var sql = SelectComment +
                   " WHERE c.app_id = @appId AND c.sheet_id = @sheetId AND c.is_deleted = FALSE" +
                   // COALESCE picks the thread's author: the parent's for a reply,
@@ -159,7 +156,8 @@ public class CommentsController : ControllerBase
 
         // The comparer collapses case-variant duplicates ("ivanov" / "Ivanov") into a
         // single notification, and makes the self-removal below case-insensitive too.
-        var toNotify = new HashSet<string>(_team.Members, StringComparer.OrdinalIgnoreCase);
+        var toNotify = new HashSet<string>(
+            await UserRoles.NotifyAudience(conn, tx), StringComparer.OrdinalIgnoreCase);
         toNotify.Add(threadAuthor);
         toNotify.Remove(author);            // never notify yourself about your own comment
 
@@ -189,11 +187,18 @@ public class CommentsController : ControllerBase
     public async Task<IActionResult> Delete(int id, [FromQuery] string author)
     {
         await using var conn = await _db.OpenConnectionAsync();
+
+        // Your own comment, always. Anyone's comment if you are an admin — which is the
+        // whole point of the role: a thread left by someone who has since left, or a
+        // comment posted on the wrong dashboard, otherwise stays there for good.
+        var isAdmin = UserRoles.CanModerate(await UserRoles.Of(conn, author));
+
         var row = await conn.QuerySingleOrDefaultAsync<(string AppId, string SheetId)?>(
             @"UPDATE comments SET is_deleted = TRUE, updated_at = now()
-              WHERE id = @id AND author = @author AND is_deleted = FALSE
+              WHERE id = @id AND is_deleted = FALSE
+                AND (@isAdmin OR lower(author) = lower(@author))
               RETURNING app_id, sheet_id",
-            new { id, author });
+            new { id, author, isAdmin });
         if (row is null) return NotFound();
         await Broadcast(row.Value.AppId, row.Value.SheetId);
         return NoContent();

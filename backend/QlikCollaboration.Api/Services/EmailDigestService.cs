@@ -21,16 +21,14 @@ public class EmailDigestService : BackgroundService
 {
     private readonly IServiceProvider _services;
     private readonly IConfiguration _config;
-    private readonly TeamRoster _team;
     private readonly ILogger<EmailDigestService> _log;
 
     public EmailDigestService(
         IServiceProvider services, IConfiguration config,
-        TeamRoster team, ILogger<EmailDigestService> log)
+        ILogger<EmailDigestService> log)
     {
         _services = services;
         _config = config;
-        _team = team;
         _log = log;
     }
 
@@ -53,9 +51,8 @@ public class EmailDigestService : BackgroundService
         }
         if (Recipients().Length == 0)
         {
-            _log.LogWarning("Email digest is enabled but Email:Recipients is empty — nothing will be sent. " +
-                            "List the BI team's e-mail addresses ({Count} usernames are on the team).",
-                            _team.Count);
+            _log.LogWarning("Email digest is enabled but Email:Recipients is empty — nothing " +
+                            "will be sent. List the BI team's e-mail addresses.");
             return;
         }
 

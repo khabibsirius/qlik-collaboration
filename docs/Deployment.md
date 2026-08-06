@@ -211,7 +211,9 @@ Windows Service inject secrets without writing them to a file.
 | `Storage:AttachmentsPath` | `Storage__AttachmentsPath` | where uploaded files are written |
 | `Cors:AllowedOrigins:0` | `Cors__AllowedOrigins__0` | allowed browser origin; `*` = any (dev only) |
 | `Qlik:BaseUrl` | `Qlik__BaseUrl` | Qlik hub the inbox's "open the sheet" links point at, e.g. `https://qlik.bank.local`. Different on every server — set it per deployment |
-| `Team:Members:0` | `Team__Members__0` | **Set this.** Usernames of the BI team, who see every thread. Everyone else sees only the threads they started. Empty = everyone is a guest and the team sees nothing; the API warns at startup |
+| `Qlik:BaseUrl` | `Qlik__BaseUrl` / `QLIK_BASE_URL` | **Set this.** Where the inbox's "open the sheet" links point, e.g. `https://qlik.bank.local`. Different from `Cors:AllowedOrigins`, which decides who may *call* the API. Empty = links are omitted rather than pointing at the wrong machine |
+| `Team:Admins:0` | `Team__Admins__0` | **Set at least one.** Seeds the first admin, who can then grant roles from the team inbox. Without one, the roles screen is read-only and the API warns at startup |
+| `Team:Members:0` | `Team__Members__0` | Seeds the BI team, who see every thread and receive notifications. Everyone else is a guest and sees only the threads they started |
 | `Email:Enabled` | `Email__Enabled` | turn the digest on (default `false`) |
 | `Email:Host` / `Email:Port` | `Email__Host` / `Email__Port` | internal SMTP relay, e.g. `smtp.bank.local` / `25` |
 | `Email:From` | `Email__From` | sender address the relay will accept |
@@ -220,6 +222,26 @@ Windows Service inject secrets without writing them to a file.
 | `Email:IntervalMinutes` | `Email__IntervalMinutes` | how often to check (default 30, minimum 5) |
 | `Email:ReminderHours` | `Email__ReminderHours` | with nothing new, re-send the unanswered list at most this often (default 24) |
 | `Email:InboxUrl` | `Email__InboxUrl` | the team inbox address the e-mail links to |
+
+### Roles
+
+Three roles, stored in the database and managed from **People and access** in the team
+inbox:
+
+| Role | Sees | May also |
+|---|---|---|
+| `guest` | only the threads they started | — |
+| `team` | every thread; receives notifications | — |
+| `admin` | every thread | delete anyone's comment, change roles |
+
+`Team:Admins` and `Team:Members` only *seed* these at startup, and seeding never lowers
+a role — so changes made in the panel survive a restart. New users arrive as guests; a
+role is granted deliberately, never by showing up.
+
+> This is a permission model, not a security boundary. The API trusts the username it
+> is given (see [Enterprise.md](Enterprise.md)), so roles decide what the interface
+> offers, not what a determined caller can reach. Enforcing them needs the
+> authentication work listed there.
 
 ### Testing the digest without a mail server
 

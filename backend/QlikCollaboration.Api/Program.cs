@@ -16,7 +16,7 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddSignalR();
-builder.Services.AddSingleton<TeamRoster>();
+builder.Services.AddSingleton<RoleSeeder>();
 builder.Services.AddScoped<DigestBuilder>();
 // Singleton and hosted service are the same instance, so the controller's manual
 // trigger runs the identical code path as the timer rather than a copy of it.
@@ -48,17 +48,10 @@ var app = builder.Build();
 app.Logger.LogInformation("CORS: {Policy}",
     allowAnyOrigin ? "any origin (development)" : string.Join(", ", allowedOrigins));
 
-// Worth saying out loud at startup: an empty roster means every user is treated as a
-// guest and sees only their own threads, which looks exactly like "the panel lost all
-// the comments" to the team that configured nothing.
-var roster = app.Services.GetRequiredService<TeamRoster>();
-if (roster.Count == 0)
-    app.Logger.LogWarning(
-        "Team:Members is empty — every user is treated as a guest and will see only " +
-        "the threads they started. List the BI team's usernames to give them the full view.");
-else
-    app.Logger.LogInformation("BI team ({Count}): {Members}",
-        roster.Count, string.Join(", ", roster.Members));
+// Roles are managed from the team inbox and only seeded from configuration, so this
+// runs once at startup to apply Team:Admins / Team:Members and to say plainly when
+// nobody can administer anything yet.
+await app.Services.GetRequiredService<RoleSeeder>().RunAsync();
 
 // Swagger is handy on a pilot server but is an unnecessary surface in production —
 // turn it off with Swagger:Enabled=false.

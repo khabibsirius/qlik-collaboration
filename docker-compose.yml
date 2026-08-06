@@ -42,6 +42,7 @@ services:
       # Comma-separated list is not supported — one indexed variable per origin.
       # Leave unset to allow any origin (development only).
       Cors__AllowedOrigins__0: ${QLIK_ORIGIN:-*}
+      Qlik__BaseUrl: ${QLIK_BASE_URL:-}
       Swagger__Enabled: "${SWAGGER_ENABLED:-true}"
       ASPNETCORE_ENVIRONMENT: Production
     ports:

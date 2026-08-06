@@ -206,6 +206,34 @@
   }
   .bar-name em { color: var(--muted); font-style: normal; }
   .bars-note { margin-top: 9px; font-size: 12px; color: var(--muted); }
+
+  /* ---------- people & roles ---------- */
+  .people { width: 100%; border-collapse: collapse; }
+  .people th {
+    text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; color: var(--muted); padding: 0 10px 7px 0;
+  }
+  .people td { padding: 7px 10px 7px 0; border-top: 1px solid var(--hair); font-size: 13px; }
+  .people td.num { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  .people .who { font-weight: 600; }
+  .people .dir { color: var(--muted); font-size: 11.5px; }
+  .role-pick {
+    border: 1px solid var(--hair); background: var(--card); color: var(--ink-2);
+    border-radius: 20px; padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .role-pick:disabled { cursor: default; opacity: .6; }
+  .role-admin { border-color: var(--s-critical); color: var(--s-critical); font-weight: 600; }
+  .role-team  { border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
+  .who-am-i { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+  .who-am-i input {
+    border: 1px solid var(--hair); background: var(--card); color: var(--ink);
+    border-radius: 7px; padding: 4px 9px; font: inherit; font-size: 12.5px; width: 180px;
+  }
+  .who-am-i input:focus { outline: none; border-color: var(--brand); }
+  .note {
+    margin-top: 10px; font-size: 11.5px; color: var(--muted);
+    border-top: 1px solid var(--hair); padding-top: 9px;
+  }
   /* Track carries no fill of its own; the surface between segments is the 2px gap. */
   .bar-track { height: 14px; display: flex; gap: 2px; }
   .bar-seg { min-width: 3px; }
@@ -280,6 +308,9 @@
   }
   .actions a:hover, .actions button.link:hover { color: var(--ink); text-decoration: underline; }
   .actions .open { color: var(--brand-ink); font-weight: 500; }
+  .actions .danger:hover { color: var(--s-critical); }
+  /* armed: the next click really deletes */
+  .actions .danger.armed { color: var(--s-critical); font-weight: 700; }
 
   .replies { margin: 8px 0 0; padding-left: 12px; border-left: 2px solid var(--grid); }
   .reply { padding: 4px 0; font-size: 13px; }
@@ -328,6 +359,12 @@
 
   <div class="section-label">Open feedback by dashboard</div>
   <div class="panel" id="breakdown"></div>
+
+  <div class="section-label queue-head">
+    <span>People and access</span>
+    <button id="togglePeople" type="button">show</button>
+  </div>
+  <div class="panel" id="people" style="display:none"></div>
 
   <div class="section-label queue-head">
     <span>The queue</span>
@@ -703,6 +740,11 @@
         (it.replyCount > 0
           ? '<button class="link" data-toggle="' + it.id + '">' + (isOpen ? "hide replies" : "show replies") + "</button>"
           : "") +
+        // Deleting someone else's comment is the admin's job and nobody else's, so the
+        // action only exists for them. The API enforces the same rule independently.
+        (myRole() === "admin"
+          ? '<button class="link danger" data-del="' + it.id + '">delete</button>'
+          : "") +
       "</div>" +
       (isOpen ? '<div class="replies">' + (expanded[it.id].length
         ? expanded[it.id].map(function (r) {
@@ -760,6 +802,110 @@
              (shut ? "" : g.items.map(one).join(""));
     }).join("");
   }
+
+  // ---- people & roles -----------------------------------------------------
+  // There is no login here: the API trusts the name it is given, so "who am I" is
+  // typed rather than proven. That makes this a permission model - it decides what
+  // the interface offers - and not a security boundary. Said plainly in the panel
+  // too, because a roles screen that looks like access control while being advisory
+  // is worse than one that admits it.
+
+  var ROLES = [
+    { v: "admin", label: "Admin", hint: "sees everything, may delete any comment and set roles" },
+    { v: "team",  label: "Team",  hint: "sees every thread and gets the notifications" },
+    { v: "guest", label: "Guest", hint: "sees only the threads they started" }
+  ];
+  var people = [];
+  var me = "";
+  try { me = localStorage.getItem("qlikCollab.admin") || ""; } catch (e) { me = ""; }
+
+  function myRole() {
+    for (var i = 0; i < people.length; i++) {
+      if (people[i].username.toLowerCase() === me.toLowerCase()) return people[i].role;
+    }
+    return "guest";
+  }
+
+  function loadPeople() {
+    return fetch("api/users")
+      .then(function (r) { return r.json(); })
+      .then(function (list) { people = list || []; renderPeople(); })
+      .catch(function () { showError("Could not load the people list."); });
+  }
+
+  function renderPeople() {
+    var $p = $("people");
+    if ($p.style.display === "none") return;
+    var amAdmin = myRole() === "admin";
+
+    var rows = people.map(function (u) {
+      var opts = ROLES.map(function (r) {
+        return '<option value="' + r.v + '"' + (u.role === r.v ? " selected" : "") + ">" +
+               esc(r.label) + "</option>";
+      }).join("");
+      return "<tr>" +
+        '<td><span class="who">' + esc(u.username) + "</span>" +
+          (u.userDirectory ? ' <span class="dir">' + esc(u.userDirectory) + "</span>" : "") + "</td>" +
+        '<td><select class="role-pick role-' + esc(u.role) + '" data-user="' + esc(u.username) + '"' +
+          (amAdmin ? "" : " disabled") + ">" + opts + "</select></td>" +
+        '<td class="num">' + u.threads + "</td>" +
+        '<td class="num">' + u.replies + "</td>" +
+        '<td class="num">' + (u.lastSeen ? esc(fmtTime(u.lastSeen)) : "—") + "</td>" +
+      "</tr>";
+    }).join("");
+
+    $p.innerHTML =
+      '<div class="who-am-i"><span>You are</span>' +
+        '<input id="whoami" value="' + esc(me) + '" placeholder="your username" autocomplete="off"/>' +
+        "<span>" + (me
+          ? (myRole() === "admin"
+              ? "— admin, so you can change roles below."
+              : "— " + esc(myRole()) + ". Only an admin can change roles.")
+          : "— type your username to act as yourself.") + "</span></div>" +
+      '<table class="people"><thead><tr>' +
+        "<th>Person</th><th>Role</th><th>Threads</th><th>Replies</th><th>Last wrote</th>" +
+      "</tr></thead><tbody>" +
+      (rows || '<tr><td colspan="5" class="dir">Nobody has opened the panel yet.</td></tr>') +
+      "</tbody></table>" +
+      '<div class="note">' +
+        ROLES.map(function (r) { return "<b>" + esc(r.label) + "</b> — " + esc(r.hint); }).join(" · ") +
+        "<br/>This decides what the interface offers. It is not a login: the API trusts " +
+        "the name it is sent, so it keeps people out of each other's way rather than " +
+        "keeping anyone out." +
+      "</div>";
+  }
+
+  $("togglePeople").addEventListener("click", function () {
+    var $p = $("people"), open = $p.style.display === "none";
+    $p.style.display = open ? "" : "none";
+    this.textContent = open ? "hide" : "show";
+    if (open) loadPeople();
+  });
+
+  $("people").addEventListener("change", function (e) {
+    var sel = e.target.closest(".role-pick");
+    if (sel) {
+      var user = sel.getAttribute("data-user");
+      fetch("api/users/" + encodeURIComponent(user) + "/role", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: sel.value, by: me })
+      }).then(function (r) {
+        if (r.ok) return loadPeople();
+        return r.json().then(function (b) { throw new Error((b && b.error) || "server said " + r.status); });
+      }).catch(function (err) {
+        showError("Could not change the role: " + (err && err.message));
+        loadPeople();                      // put the dropdown back to the truth
+      });
+      return;
+    }
+    if (e.target.id === "whoami") {
+      me = e.target.value.trim();
+      try { localStorage.setItem("qlikCollab.admin", me); } catch (e2) { /* private mode */ }
+      renderPeople();
+      render();     // who you are decides whether the queue offers delete at all
+    }
+  });
 
   // ---- data ---------------------------------------------------------------
   function load() {
@@ -863,6 +1009,30 @@
       }).catch(function (err) { showError("Could not change the status: " + (err && err.message)); });
       return;
     }
+    var del = e.target.closest("button[data-del]");
+    if (del) {
+      // Two clicks, not a modal. It is a soft delete, but nothing in the interface
+      // brings it back, so one stray click should not be enough.
+      if (!del.classList.contains("armed")) {
+        del.classList.add("armed");
+        del.textContent = "delete?";
+        clearTimeout(window.__delTimer);
+        window.__delTimer = setTimeout(function () {
+          del.classList.remove("armed");
+          del.textContent = "delete";
+        }, 3000);
+        return;
+      }
+      fetch("api/comments/" + del.getAttribute("data-del") + "?author=" + encodeURIComponent(me),
+            { method: "DELETE" })
+        .then(function (r) {
+          if (!r.ok) throw new Error("server answered " + r.status);
+          lastPayload = ""; load();
+        })
+        .catch(function (err) { showError("Could not delete: " + (err && err.message)); });
+      return;
+    }
+
     var toggle = e.target.closest("button[data-toggle]");
     if (toggle) {
       var id = toggle.getAttribute("data-toggle");
@@ -914,6 +1084,7 @@
     .then(function (r) { return r.json(); })
     .then(function (c) { qlikBaseUrl = (c && c.qlikBaseUrl) || ""; })
     .catch(function () { /* links are simply omitted */ })
+    .then(loadPeople)          // myRole() decides whether delete is offered
     .then(function () { load(); setPoll(10000); connect(); });
 })();
 </script>

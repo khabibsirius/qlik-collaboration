@@ -38,6 +38,26 @@ CREATE TABLE IF NOT EXISTS comments (
     updated_at      TIMESTAMPTZ NULL
 );
 
+-- Roles. 'guest' is the default and the safe one: an executive who has opened a
+-- dashboard sees only the threads they started themselves.
+--   guest — sees only their own threads
+--   team  — sees every thread; the audience notifications are sent to
+--   admin — team, plus may delete anyone's comment and change other people's roles
+--
+-- Written as ALTER rather than only in CREATE TABLE above, because a server that is
+-- already running has the table and would skip CREATE TABLE IF NOT EXISTS entirely —
+-- re-running this file has to upgrade it, not silently do nothing.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'guest';
+DO $$
+BEGIN
+    ALTER TABLE users ADD CONSTRAINT users_role_check
+        CHECK (role IN ('admin', 'team', 'guest'));
+EXCEPTION
+    WHEN duplicate_object THEN NULL;   -- already applied on a previous run
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
+
 CREATE INDEX IF NOT EXISTS idx_comments_app_sheet ON comments (app_id, sheet_id);
 CREATE INDEX IF NOT EXISTS idx_comments_parent    ON comments (parent_id);
 
