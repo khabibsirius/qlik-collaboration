@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.11.2";
+  var EXT_VERSION = "0.11.3";
 
   function esc(text) {
     return String(text)

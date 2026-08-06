@@ -611,14 +611,35 @@
 .qcol-bubbly:not(.qcol-expanded) .qcol-bubble { width: 100%; height: 100%; }
 .qcol-bubbly.qcol-dragging .qcol-bubble { cursor: grabbing; transform: none; }
 
-/* Qlik draws a white background and border around every object. While the panel is
-   floating, its cell is empty, so that box is an empty white rectangle on the sheet.
-   Applied to the object's own container chain only, and removed again on destroy. */
+/* Applied to the object's own container chain while the panel floats, and removed
+   again on destroy.
+
+   Two jobs. First, Qlik draws a white background and border around every object, and
+   the cell is empty once the panel has floated out of it — that box would sit on the
+   sheet as an empty white rectangle.
+
+   Second, and the reason the bubble kept vanishing behind charts: position:fixed
+   decides where an element is placed, not what it paints in front of. Paint order is
+   still decided inside the nearest ancestor that forms a stacking context, and a Qlik
+   cell forms one as soon as it carries a z-index. Inside it, no z-index the panel
+   gives itself — however large — can lift it above a *sibling* cell, so any chart
+   later in the grid covers the bubble. Lifting the cell itself is what actually
+   raises the panel, because the whole context moves with it.
+
+   (The runtime probe in the JS does not catch this: it checks that fixed resolves to
+   the viewport, which a plain z-index ancestor does not disturb. Only transform-like
+   properties break positioning, and those it does catch.) */
 .qcol-host-transparent {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
+  z-index: 2147482000 !important;
+  /* The lifted cell is empty and now sits above its neighbours, so without this it
+     would swallow clicks meant for the charts underneath it. */
+  pointer-events: none !important;
 }
+/* ...and the panel itself takes its clicks back. */
+.qcol-bubbly { pointer-events: auto; }
 .qcol-bubbly:not(.qcol-expanded) > *:not(.qcol-bubble) { display: none !important; }
 .qcol-bubbly:not(.qcol-expanded) .qcol-bubble {
   display: flex;
