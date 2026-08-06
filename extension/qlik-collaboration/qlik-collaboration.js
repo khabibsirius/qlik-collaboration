@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.11.4";
+  var EXT_VERSION = "0.12.0";
 
   function esc(text) {
     return String(text)
@@ -318,7 +318,20 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username: who, userDirectory: dir || null })
-        }).then(refreshNotifs).catch(function () { self._registeredAs = null; });
+        }).then(function (r) {
+          return r.ok ? r.json() : null;
+        }).then(function (u) {
+          // An admin may delete anyone's comment. The panel has to be told, because
+          // the delete link is drawn client-side; the API checks the role again on
+          // its own, so this decides what is offered, not what is allowed.
+          var role = (u && u.role) || "guest";
+          if (role !== self._role) {
+            self._role = role;
+            self._lastPayload = "";      // re-render: the actions per comment change
+          }
+          refreshNotifs();
+          refresh();
+        }).catch(function () { self._registeredAs = null; });
       }
 
       function showManualIdentity() {
@@ -1103,6 +1116,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
         function one(c, isReply) {
           var own = c.author === me;
+          var mayDelete = own || self._role === "admin";
           var h = '<div class="qcol-item' + (isReply ? " qcol-reply" : "") + '" data-id="' + c.id + '">';
           h += '<span class="qcol-avatar" style="background:' + avatarColor(c.author) + '">' + esc(initials(c.author)) + "</span>";
           h += '<div class="qcol-msg">';
@@ -1124,7 +1138,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             h += '<a href="#" class="qcol-applysel" data-sel="' + esc(c.selectionState) + '">📎 apply filters</a>';
           }
           if (!isReply) h += '<a href="#" class="qcol-doreply" data-id="' + c.id + '" data-author="' + esc(c.author) + '">reply</a>';
-          if (own) h += '<a href="#" class="qcol-delete" data-id="' + c.id + '">delete</a>';
+          if (mayDelete) h += '<a href="#" class="qcol-delete" data-id="' + c.id + '">delete</a>';
           h += "</div></div></div>";
           return h;
         }

@@ -72,7 +72,26 @@
     color: var(--ink);
     font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   }
-  .wrap { max-width: 1160px; margin: 0 auto; padding: 0 20px 64px; }
+  /* Two columns: the queue is the work, so it takes the room, and the roles screen
+     lives beside it instead of pushing it down the page. On a wide monitor the old
+     centred 1160px column left most of the screen empty. */
+  .wrap {
+    max-width: 1720px; margin: 0 auto; padding: 0 20px 64px;
+    display: grid; grid-template-columns: 330px minmax(0, 1fr);
+    gap: 0 26px; align-items: start;
+  }
+  .side { position: sticky; top: 104px; }      /* clears the two-row header */
+  .main { min-width: 0; }                       /* lets the queue shrink, not overflow */
+
+  /* Hidden: the queue takes the whole width and the way back is in the header. */
+  .wrap.no-side { grid-template-columns: minmax(0, 1fr); }
+  .wrap.no-side .side { display: none; }
+
+  /* Narrow screens have no room for a second column; stack and stop sticking. */
+  @media (max-width: 1150px) {
+    .wrap { grid-template-columns: minmax(0, 1fr); }
+    .side { position: static; }
+  }
 
   /* ---------- header ---------- */
   header {
@@ -207,29 +226,36 @@
   .bar-name em { color: var(--muted); font-style: normal; }
   .bars-note { margin-top: 9px; font-size: 12px; color: var(--muted); }
 
-  /* ---------- people & roles ---------- */
-  .people { width: 100%; border-collapse: collapse; }
-  .people th {
-    text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .5px;
-    text-transform: uppercase; color: var(--muted); padding: 0 10px 7px 0;
+  /* ---------- people & roles ----------
+     A row per person rather than a five-column table: the sidebar is 330px and a
+     table with Threads / Replies / Last wrote columns simply does not fit in it. */
+  .person {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 0; border-top: 1px solid var(--hair);
   }
-  .people td { padding: 7px 10px 7px 0; border-top: 1px solid var(--hair); font-size: 13px; }
-  .people td.num { font-variant-numeric: tabular-nums; color: var(--ink-2); }
-  .people .who { font-weight: 600; }
-  .people .dir { color: var(--muted); font-size: 11.5px; }
+  .person:first-of-type { border-top: 0; }
+  .person-main { flex: 1; min-width: 0; }
+  .person-name {
+    font-weight: 600; font-size: 12.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .person-sub { font-size: 11px; color: var(--muted); }
   .role-pick {
+    flex: none;
     border: 1px solid var(--hair); background: var(--card); color: var(--ink-2);
-    border-radius: 20px; padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer;
+    border-radius: 20px; padding: 3px 6px; font: inherit; font-size: 11.5px; cursor: pointer;
   }
   .role-pick:disabled { cursor: default; opacity: .6; }
   .role-admin { border-color: var(--s-critical); color: var(--s-critical); font-weight: 600; }
   .role-team  { border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
-  .who-am-i { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+  .who-am-i { margin-bottom: 10px; font-size: 12px; color: var(--muted); }
   .who-am-i input {
+    display: block; width: 100%; margin-top: 4px;
     border: 1px solid var(--hair); background: var(--card); color: var(--ink);
-    border-radius: 7px; padding: 4px 9px; font: inherit; font-size: 12.5px; width: 180px;
+    border-radius: 7px; padding: 5px 9px; font: inherit; font-size: 12.5px;
   }
   .who-am-i input:focus { outline: none; border-color: var(--brand); }
+  .who-am-i b { color: var(--ink-2); }
   .note {
     margin-top: 10px; font-size: 11.5px; color: var(--muted);
     border-top: 1px solid var(--hair); padding-top: 9px;
@@ -332,6 +358,7 @@
   <div class="head-in">
     <h1>Team inbox <b id="count"></b></h1>
     <div class="spacer"></div>
+    <button class="icon-btn" id="showSide" title="People and access" style="display:none">People</button>
     <div class="conn" id="conn">connecting…</div>
     <button class="icon-btn" id="theme" title="Light / dark">◐</button>
   </div>
@@ -351,26 +378,30 @@
   </div>
 </header>
 
-<div class="wrap">
-  <div id="err" class="error" style="display:none"></div>
+<div class="wrap" id="wrap">
+  <aside class="side" id="side">
+    <div class="section-label queue-head">
+      <span>People and access</span>
+      <button id="collapseSide" type="button">hide</button>
+    </div>
+    <div class="panel" id="people"></div>
+  </aside>
 
-  <div class="section-label">Where things stand</div>
-  <div class="kpis" id="kpis"></div>
+  <main class="main">
+    <div id="err" class="error" style="display:none"></div>
 
-  <div class="section-label">Open feedback by dashboard</div>
-  <div class="panel" id="breakdown"></div>
+    <div class="section-label">Where things stand</div>
+    <div class="kpis" id="kpis"></div>
 
-  <div class="section-label queue-head">
-    <span>People and access</span>
-    <button id="togglePeople" type="button">show</button>
-  </div>
-  <div class="panel" id="people" style="display:none"></div>
+    <div class="section-label">Open feedback by dashboard</div>
+    <div class="panel" id="breakdown"></div>
 
-  <div class="section-label queue-head">
-    <span>The queue</span>
-    <button id="collapseAll" type="button">collapse all</button>
-  </div>
-  <div id="list"></div>
+    <div class="section-label queue-head">
+      <span>The queue</span>
+      <button id="collapseAll" type="button">collapse all</button>
+    </div>
+    <div id="list"></div>
+  </main>
 </div>
 
 <div id="tip"></div>
@@ -835,7 +866,6 @@
 
   function renderPeople() {
     var $p = $("people");
-    if ($p.style.display === "none") return;
     var amAdmin = myRole() === "admin";
 
     var rows = people.map(function (u) {
@@ -843,44 +873,53 @@
         return '<option value="' + r.v + '"' + (u.role === r.v ? " selected" : "") + ">" +
                esc(r.label) + "</option>";
       }).join("");
-      return "<tr>" +
-        '<td><span class="who">' + esc(u.username) + "</span>" +
-          (u.userDirectory ? ' <span class="dir">' + esc(u.userDirectory) + "</span>" : "") + "</td>" +
-        '<td><select class="role-pick role-' + esc(u.role) + '" data-user="' + esc(u.username) + '"' +
-          (amAdmin ? "" : " disabled") + ">" + opts + "</select></td>" +
-        '<td class="num">' + u.threads + "</td>" +
-        '<td class="num">' + u.replies + "</td>" +
-        '<td class="num">' + (u.lastSeen ? esc(fmtTime(u.lastSeen)) : "—") + "</td>" +
-      "</tr>";
+      var wrote = [];
+      if (u.threads) wrote.push(u.threads + (u.threads === 1 ? " thread" : " threads"));
+      if (u.replies) wrote.push(u.replies + (u.replies === 1 ? " reply" : " replies"));
+      if (!wrote.length) wrote.push("has not written yet");
+      if (u.lastSeen) wrote.push(fmtTime(u.lastSeen));
+
+      return '<div class="person">' +
+          '<div class="person-main">' +
+            '<div class="person-name" title="' + esc(u.username) +
+              (u.userDirectory ? " (" + esc(u.userDirectory) + ")" : "") + '">' +
+              esc(u.username) + "</div>" +
+            '<div class="person-sub">' + esc(wrote.join(" · ")) + "</div>" +
+          "</div>" +
+          '<select class="role-pick role-' + esc(u.role) + '" data-user="' + esc(u.username) + '"' +
+            (amAdmin ? "" : " disabled") + ">" + opts + "</select>" +
+        "</div>";
     }).join("");
 
     $p.innerHTML =
-      '<div class="who-am-i"><span>You are</span>' +
+      '<div class="who-am-i">You are' +
         '<input id="whoami" value="' + esc(me) + '" placeholder="your username" autocomplete="off"/>' +
-        "<span>" + (me
-          ? (myRole() === "admin"
-              ? "— admin, so you can change roles below."
-              : "— " + esc(myRole()) + ". Only an admin can change roles.")
-          : "— type your username to act as yourself.") + "</span></div>" +
-      '<table class="people"><thead><tr>' +
-        "<th>Person</th><th>Role</th><th>Threads</th><th>Replies</th><th>Last wrote</th>" +
-      "</tr></thead><tbody>" +
-      (rows || '<tr><td colspan="5" class="dir">Nobody has opened the panel yet.</td></tr>') +
-      "</tbody></table>" +
+        "<div style=\"margin-top:5px\">" + (me
+          ? (amAdmin ? "<b>Admin</b> — you can change roles and delete any comment."
+                     : "<b>" + esc(myRole()) + "</b> — only an admin can change roles.")
+          : "Type your username to act as yourself.") + "</div>" +
+      "</div>" +
+      (rows || '<div class="person-sub">Nobody has opened the panel yet.</div>') +
       '<div class="note">' +
-        ROLES.map(function (r) { return "<b>" + esc(r.label) + "</b> — " + esc(r.hint); }).join(" · ") +
-        "<br/>This decides what the interface offers. It is not a login: the API trusts " +
-        "the name it is sent, so it keeps people out of each other's way rather than " +
-        "keeping anyone out." +
+        ROLES.map(function (r) { return "<b>" + esc(r.label) + "</b> — " + esc(r.hint); }).join("<br/>") +
+        "<br/><br/>This decides what the interface offers. It is not a login: the API " +
+        "trusts the name it is sent, so it keeps people out of each other's way rather " +
+        "than keeping anyone out." +
       "</div>";
   }
 
-  $("togglePeople").addEventListener("click", function () {
-    var $p = $("people"), open = $p.style.display === "none";
-    $p.style.display = open ? "" : "none";
-    this.textContent = open ? "hide" : "show";
+  // Hiding it gives the whole width to the queue; the way back is in the header, so a
+  // hidden sidebar is never a hidden feature.
+  function setSide(open) {
+    $("wrap").classList.toggle("no-side", !open);
+    $("showSide").style.display = open ? "none" : "";
+    try { localStorage.setItem("qlikCollab.side", open ? "1" : "0"); } catch (e) { /* noop */ }
     if (open) loadPeople();
-  });
+  }
+  $("collapseSide").addEventListener("click", function () { setSide(false); });
+  $("showSide").addEventListener("click", function () { setSide(true); });
+  try { setSide(localStorage.getItem("qlikCollab.side") !== "0"); }
+  catch (e) { setSide(true); }
 
   $("people").addEventListener("change", function (e) {
     var sel = e.target.closest(".role-pick");

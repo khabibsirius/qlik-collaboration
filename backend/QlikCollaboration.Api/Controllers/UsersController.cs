@@ -67,7 +67,11 @@ public class UsersController : ControllerBase
               ON CONFLICT (lower(username)) DO UPDATE
                 SET user_directory = COALESCE(EXCLUDED.user_directory, users.user_directory)",
             new { username, directory = string.IsNullOrWhiteSpace(dto.UserDirectory) ? null : dto.UserDirectory.Trim() });
-        return NoContent();
+
+        // Answer with the role. The panel registers on every load anyway, so this
+        // saves a second round trip and is the only way it can know whether to offer
+        // an admin the delete link on other people's comments.
+        return Ok(new { username, role = await UserRoles.Of(conn, username) });
     }
 
     public record SetRoleDto(string Role, string By);
