@@ -75,6 +75,19 @@ app.UseCors();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
+// A build that predates the inbox page — or a container built from a stale publish
+// folder, which Dockerfile.prebuilt copies verbatim — answers /health perfectly while
+// "/" returns 404. Those two symptoms together look like a routing problem and are
+// not, so name the real cause once, at startup, where the log will be looked at.
+var inboxPage = Path.Combine(app.Environment.WebRootPath ?? "", "index.html");
+if (File.Exists(inboxPage))
+    app.Logger.LogInformation("Team inbox served at /");
+else
+    app.Logger.LogWarning(
+        "wwwroot/index.html is missing from this build, so the team inbox at / will 404 " +
+        "while the API itself works. Re-run `dotnet publish` and rebuild the image — a " +
+        "publish folder made before the inbox existed does not contain it.");
+
 app.MapControllers();
 app.MapHub<CommentsHub>("/hubs/comments");
 

@@ -167,6 +167,13 @@ if ($hasSdk) {
     & dotnet publish $project -c Release -o $publishDir --nologo
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 
+    # Dockerfile.prebuilt copies this folder verbatim, so anything missing here is
+    # missing in the container -- and a missing inbox page shows up only as "/ returns
+    # 404 but /health is fine", long after the build looked successful.
+    if (-not (Test-Path (Join-Path $publishDir "wwwroot\index.html"))) {
+        throw "publish\wwwroot\index.html is missing; the image would serve the API without the team inbox."
+    }
+
     $env:DOCKERFILE = "Dockerfile.prebuilt"
     $tag = Get-EnvValue 'WINDOWS_TAG' 'ltsc2022'
     $env:RUNTIME_IMAGE = if ($osType -eq 'windows') {
