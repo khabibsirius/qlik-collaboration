@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.12.1";
+  var EXT_VERSION = "0.13.0";
 
   function esc(text) {
     return String(text)
@@ -1764,17 +1764,67 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       // Open next to the bubble, growing into whichever side has room, so the panel
       // never appears somewhere unrelated to the button that was just clicked.
-      function placePanel() {
-        var p = self._bubblePos;
+      // Where the open panel sits. Once it has been dragged by its title bar that
+      // position wins and is remembered; until then it opens next to the bubble.
+      var panelPos = null;
+      try {
+        var savedPanel = JSON.parse(localStorage.getItem("qlikCollab.panelPos") || "null");
+        if (savedPanel && isFinite(savedPanel.left) && isFinite(savedPanel.top)) panelPos = savedPanel;
+      } catch (e) { panelPos = null; }
+
+      function clampPanel(pos) {
         var w = Math.min(370, window.innerWidth - 2 * EDGE);
         var h = Math.min(560, window.innerHeight - 2 * EDGE);
-        var left = (p.left + BUBBLE / 2 > window.innerWidth / 2) ? p.left + BUBBLE - w : p.left;
-        var top = (p.top + BUBBLE / 2 > window.innerHeight / 2) ? p.top + BUBBLE - h : p.top;
-        $panel.css({
-          left: Math.min(Math.max(left, EDGE), Math.max(EDGE, window.innerWidth - w - EDGE)) + "px",
-          top: Math.min(Math.max(top, EDGE), Math.max(EDGE, window.innerHeight - h - EDGE)) + "px"
-        });
+        return {
+          left: Math.min(Math.max(pos.left, EDGE), Math.max(EDGE, window.innerWidth - w - EDGE)),
+          top: Math.min(Math.max(pos.top, EDGE), Math.max(EDGE, window.innerHeight - h - EDGE))
+        };
       }
+
+      function placePanel() {
+        var pos;
+        if (panelPos) {
+          pos = clampPanel(panelPos);
+        } else {
+          // never opened away from the bubble yet: grow into whichever side has room
+          var p = self._bubblePos;
+          var w = Math.min(370, window.innerWidth - 2 * EDGE);
+          var h = Math.min(560, window.innerHeight - 2 * EDGE);
+          pos = clampPanel({
+            left: (p.left + BUBBLE / 2 > window.innerWidth / 2) ? p.left + BUBBLE - w : p.left,
+            top: (p.top + BUBBLE / 2 > window.innerHeight / 2) ? p.top + BUBBLE - h : p.top
+          });
+        }
+        $panel.css({ left: pos.left + "px", top: pos.top + "px" });
+      }
+
+      // ---- move the open panel by its title bar, the way a window moves ----
+      // Only from the header, and never from a control inside it: the bell, the
+      // close button and the identity chip have to stay clickable.
+      $ui.on("mousedown", ".qcol-header", function (e) {
+        if (e.button !== 0) return;
+        if (!$panel.hasClass("qcol-bubbly") || !$panel.hasClass("qcol-expanded")) return;
+        if ($(e.target).closest("a, button, input, select, textarea, .qcol-bell, .qcol-collapse").length) return;
+
+        e.preventDefault();                       // otherwise the drag selects the title text
+        var box = $panel[0].getBoundingClientRect();
+        var grabX = e.clientX - box.left, grabY = e.clientY - box.top;
+        $panel.addClass("qcol-moving");
+
+        function onMove(ev) {
+          panelPos = clampPanel({ left: ev.clientX - grabX, top: ev.clientY - grabY });
+          $panel.css({ left: panelPos.left + "px", top: panelPos.top + "px" });
+        }
+        function onUp() {
+          document.removeEventListener("mousemove", onMove, true);
+          document.removeEventListener("mouseup", onUp, true);
+          $panel.removeClass("qcol-moving");
+          try { localStorage.setItem("qlikCollab.panelPos", JSON.stringify(panelPos)); }
+          catch (e2) { /* private mode - it just will not be remembered */ }
+        }
+        document.addEventListener("mousemove", onMove, true);
+        document.addEventListener("mouseup", onUp, true);
+      });
 
       // Qlik's own object box would otherwise sit on the sheet as an empty white
       // rectangle once the panel has floated out of it. Bounded walk up the object's
@@ -1860,6 +1910,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // no way to reach it.
       self._onWindowResize = function () {
         self._bubblePos = clamp(self._bubblePos);
+        if (panelPos) panelPos = clampPanel(panelPos);   // a smaller window must not strand it
         if (self._expanded) placePanel(); else placeBubble();
       };
       window.addEventListener("resize", self._onWindowResize);

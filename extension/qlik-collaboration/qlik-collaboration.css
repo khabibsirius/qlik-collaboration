@@ -667,6 +667,25 @@
    row behaves exactly as it does docked. Only the bubble itself stays hidden. */
 .qcol-bubbly.qcol-expanded .qcol-bubble { display: none; }
 
+/* The header is the title bar: grab it to move the panel. Only while floating and
+   open — docked in a cell there is nowhere to move it to. */
+.qcol-bubbly.qcol-expanded .qcol-header {
+  cursor: move;
+  user-select: none;
+}
+/* Controls inside the title bar keep their own cursor, so it stays obvious that the
+   bell and the close button are still buttons. */
+.qcol-bubbly.qcol-expanded .qcol-header .qcol-bell,
+.qcol-bubbly.qcol-expanded .qcol-header .qcol-collapse { cursor: pointer; }
+
+.qcol-panel.qcol-moving {
+  user-select: none;
+  /* lifted while it moves, and no transition so it tracks the pointer exactly */
+  box-shadow: 0 18px 44px rgba(16, 24, 40, .34);
+  animation: none;
+}
+.qcol-panel.qcol-moving .qcol-header { cursor: grabbing; }
+
 /* the ✕ only exists when there is something to collapse back into */
 .qcol-collapse { display: none; cursor: pointer; color: var(--qcol-faint); font-size: 12px; }
 .qcol-collapse:hover { color: #dc2626; }

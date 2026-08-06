@@ -123,6 +123,9 @@ recommendation; the central node is the acceptable shortcut for a pilot.
 
 ## How the team experiences it
 
+- Open, the panel **moves like a window**: drag it by its title bar and it stays
+  where you put it, per user. The bubble keeps its own position, so collapsing and
+  reopening does not undo either.
 - The panel starts **collapsed to a 💬 bubble** carrying the unread count, and expands
   over the sheet when clicked, so a dashboard is not covered until someone asks for the
   discussion. **Drag the bubble** to park it anywhere — beside the toolbar, in a corner —
