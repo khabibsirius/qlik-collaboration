@@ -102,8 +102,10 @@
   /* Two rows on purpose. One row could not hold the title, six pills, three
      dropdowns and the status without wrapping, and a wrapped flex row puts the
      connection state on a line of its own looking orphaned. */
+  /* Same width as .wrap below, or the title sits inset from the content it heads
+     and the two look like separate pages on a wide monitor. */
   .head-in {
-    max-width: 1160px; margin: 0 auto; padding: 10px 20px 0;
+    max-width: 1720px; margin: 0 auto; padding: 10px 20px 0;
     display: flex; align-items: center; gap: 14px;
   }
   .head-filters { padding: 9px 20px 10px; }
@@ -122,6 +124,12 @@
     font-size: 13px; line-height: 1;
   }
   .icon-btn:hover { border-color: var(--brand); color: var(--brand-ink); }
+  /* .icon-btn is a fixed 30px box built for a single glyph. This one carries a word,
+     which overflowed it and ran into the connection status beside it. */
+  .text-btn {
+    width: auto; padding: 0 11px; font-size: 12px; white-space: nowrap;
+    border-radius: 20px; flex: none;
+  }
 
   /* ---------- filters: one row, above everything they affect ---------- */
   .filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -358,7 +366,7 @@
   <div class="head-in">
     <h1>Team inbox <b id="count"></b></h1>
     <div class="spacer"></div>
-    <button class="icon-btn" id="showSide" title="People and access" style="display:none">People</button>
+    <button class="icon-btn text-btn" id="showSide" title="Show people and access" style="display:none">People</button>
     <div class="conn" id="conn">connecting…</div>
     <button class="icon-btn" id="theme" title="Light / dark">◐</button>
   </div>
