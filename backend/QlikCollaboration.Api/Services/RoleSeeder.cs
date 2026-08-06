@@ -48,12 +48,22 @@ public class RoleSeeder
         {
             foreach (var name in names)
             {
-                await conn.ExecuteAsync(
-                    @"INSERT INTO users (username, display_name, role)
-                      VALUES (@name, @name, @role)
-                      ON CONFLICT (username) DO UPDATE SET role = @role
-                      WHERE users.role <> 'admin' AND users.role <> @role",
+                // Matched on lower(username): the configured spelling need not be the
+                // one Qlik reports, and inserting a second row for the same person
+                // would leave them configured as an admin and treated as a guest.
+                var raised = await conn.ExecuteAsync(
+                    @"UPDATE users SET role = @role
+                      WHERE lower(username) = lower(@name)
+                        AND role <> 'admin' AND role <> @role",
                     new { name, role });
+
+                if (raised == 0)
+                    await conn.ExecuteAsync(
+                        @"INSERT INTO users (username, display_name, role)
+                          SELECT @name, @name, @role
+                          WHERE NOT EXISTS (
+                              SELECT 1 FROM users WHERE lower(username) = lower(@name))",
+                        new { name, role });
             }
         }
 

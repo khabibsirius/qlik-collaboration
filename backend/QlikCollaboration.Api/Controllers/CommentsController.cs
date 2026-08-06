@@ -124,7 +124,7 @@ public class CommentsController : ControllerBase
         await conn.ExecuteAsync(
             @"INSERT INTO users (username, display_name, user_directory)
               VALUES (@author, @author, @directory)
-              ON CONFLICT (username) DO UPDATE
+              ON CONFLICT (lower(username)) DO UPDATE
                 SET user_directory = COALESCE(EXCLUDED.user_directory, users.user_directory)",
             new { author, directory = string.IsNullOrWhiteSpace(dto.AuthorDirectory) ? null : dto.AuthorDirectory.Trim() }, tx);
 

@@ -58,6 +58,21 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
 
+-- Names differing only in case are the same person. Qlik reports one casing, and a
+-- Team:Admins entry written by hand may use another; without this the seeder inserts
+-- a SECOND row and the role lookup — which matches case-insensitively — then finds
+-- both and returns whichever the planner happens to yield first. The symptom is
+-- being configured as an admin and still treated as a guest, intermittently.
+DO $$
+BEGIN
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (lower(username));
+EXCEPTION
+    WHEN unique_violation THEN
+        RAISE WARNING
+            'users already holds names differing only in case. Merge them (keep the '
+            'spelling Qlik reports), then re-run this file to add the unique index.';
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_comments_app_sheet ON comments (app_id, sheet_id);
 CREATE INDEX IF NOT EXISTS idx_comments_parent    ON comments (parent_id);
 

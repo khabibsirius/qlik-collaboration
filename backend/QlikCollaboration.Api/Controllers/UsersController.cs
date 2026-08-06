@@ -64,7 +64,7 @@ public class UsersController : ControllerBase
         await conn.ExecuteAsync(
             @"INSERT INTO users (username, display_name, user_directory)
               VALUES (@username, @username, @directory)
-              ON CONFLICT (username) DO UPDATE
+              ON CONFLICT (lower(username)) DO UPDATE
                 SET user_directory = COALESCE(EXCLUDED.user_directory, users.user_directory)",
             new { username, directory = string.IsNullOrWhiteSpace(dto.UserDirectory) ? null : dto.UserDirectory.Trim() });
         return NoContent();
