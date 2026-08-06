@@ -22,6 +22,69 @@ User C (browser) ─┘          │
 - All users hitting the same API = everyone sees the same comments per sheet,
   with SignalR pushing changes to all open clients instantly.
 
+## Multi-node Qlik Sense: where each piece goes
+
+The collaboration backend is **not** part of the Qlik cluster. It does not care how
+many Qlik nodes exist, and Qlik does not manage it. Rule of thumb: **the extension
+goes into Qlik, everything else stays outside it.**
+
+```
+                        ┌──────────── Qlik Sense cluster ────────────┐
+User workstations       │  Central node   (Repository, QMC)          │
+   (browsers)  ─────────►  RIM node #1    (Proxy + Engine)           │  extension is
+        │               │  RIM node #2    (Proxy + Engine)           │  imported ONCE
+        │               │  Scheduler node (Reloads)                  │  via QMC and
+        │               │  Qlik repository DB (PostgreSQL :4432)     │  auto-syncs to
+        │               └────────────────────────────────────────────┘  all nodes
+        │
+        └──────────────► Collaboration app server  (NOT a Qlik node)
+                            ├─ .NET 8 runtime + QlikCollaboration.Api (Windows Service)
+                            └─ attachments folder
+                                       │
+                                       ▼
+                         PostgreSQL  (bank's existing managed instance,
+                                      or installed on the app server)
+```
+
+| Component | Where to install | Why |
+|---|---|---|
+| **Extension** | Nowhere manually — QMC → Extensions → Import on the **central node** | The repository distributes it to every RIM node automatically. Never copy files to nodes by hand: a node re-sync will overwrite them. |
+| **.NET 8 runtime + API** | **One** server outside the Qlik cluster (a small VM: 2 vCPU / 4 GB is plenty) | Keeps Qlik nodes untouched (bank change-control, Qlik upgrades, support). One instance = one source of truth for comments and one SignalR hub. |
+| **PostgreSQL** | The bank's **existing managed PostgreSQL** (just a new `qlik_collaboration` database), or on the app server if none is available | DBA-managed backups, monitoring and HA come for free. |
+| **Attachments folder** | Local disk of the app server (or a file share) | Must be backed up — files live on disk, only metadata is in the DB. |
+
+### Hard rules
+
+1. **Do NOT use Qlik's own PostgreSQL** (the repository database on port `4432`).
+   It is Qlik-internal; putting application tables there is unsupported and Qlik
+   upgrades can change or lock it. Our own PostgreSQL on `5432` coexists fine, but
+   a separate instance/server is cleaner.
+2. **Run exactly ONE instance of the backend.** SignalR keeps connections in memory;
+   two instances behind a load balancer would each broadcast to only half the users.
+   If HA is ever required, add a Redis backplane (`AddSignalR().AddStackExchangeRedis(...)`)
+   — a config change, not a redesign.
+3. **Do NOT install the backend on a RIM node.** RIM nodes are added/removed/rebuilt
+   as user load changes; the service would silently disappear with the node.
+4. **The API must be reachable from user workstations, not just from the Qlik
+   servers.** The extension is client-side JavaScript — the browser makes the calls.
+   So: a DNS name (`bi-collab.bank.local`), firewall open from the user subnet, and
+   **HTTPS/WSS if Qlik Sense is on HTTPS** (browsers block mixed content).
+
+### Which node do users hit?
+
+Irrelevant to us. A user may be load-balanced onto RIM node #1 and their colleague
+onto node #2 — both browsers still call the same collaboration API, so both see the
+same comments and the same real-time updates. The Qlik cluster topology is invisible
+to the module.
+
+### Central node vs separate VM
+
+If getting a new VM takes months, installing on the **central node** works technically
+(spare CPU is usually available and the service is lightweight). Trade-offs to state
+openly: any Qlik maintenance/reboot takes comments offline with it, and the bank's
+change control now covers a non-Qlik service on a Qlik server. A separate VM is the
+recommendation; the central node is the acceptable shortcut for a pilot.
+
 ## Step-by-step
 
 1. **Backend server**
