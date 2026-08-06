@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.11.3";
+  var EXT_VERSION = "0.11.4";
 
   function esc(text) {
     return String(text)
@@ -266,10 +266,31 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '</div>'
       );
 
-      var $list = $element.find(".qcol-list");
-      var $author = $element.find(".qcol-author");
-      var $input = $element.find(".qcol-input");
-      var $conn = $element.find(".qcol-conn");
+      // Everything below talks to the panel, not to the Qlik cell, because the panel
+      // is about to be moved out of that cell and onto document.body. Delegated
+      // handlers bound to the cell would stop firing the moment it moves.
+      var $ui = $element.find(".qcol-panel");
+      var ownerId = (layout.qInfo && layout.qInfo.qId) || "";
+      $ui.attr("data-qcol-owner", ownerId);
+      self._panelEl = $ui[0];
+
+      // If beforeDestroy never ran — a hard sheet switch, a reload mid-render — a
+      // panel from the previous instance is still sitting on document.body. Without
+      // this, navigating between sheets leaves a trail of dead bubbles.
+      if (ownerId) {
+        var stale = document.body.querySelectorAll(
+          '.qcol-panel[data-qcol-owner="' + ownerId + '"]');
+        Array.prototype.forEach.call(stale, function (node) {
+          if (node !== $ui[0] && node.parentElement === document.body) {
+            document.body.removeChild(node);
+          }
+        });
+      }
+
+      var $list = $ui.find(".qcol-list");
+      var $author = $ui.find(".qcol-author");
+      var $input = $ui.find(".qcol-input");
+      var $conn = $ui.find(".qcol-conn");
 
       // ---------- identity ----------
       // On Enterprise every user is already authenticated by the Qlik Proxy (AD),
@@ -302,9 +323,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       function showManualIdentity() {
         self._authorDirectory = null;
-        $element.find(".qcol-me, .qcol-identity-wait").hide();
-        $element.find(".qcol-identity-wait").removeClass("qcol-identity-error");
-        $element.find(".qcol-send").prop("disabled", false);
+        $ui.find(".qcol-me, .qcol-identity-wait").hide();
+        $ui.find(".qcol-identity-wait").removeClass("qcol-identity-error");
+        $ui.find(".qcol-send").prop("disabled", false);
         $author.show().val(localStorage.getItem("qlikCollab.author") || "");
         self._lastPayload = "";
         refresh();
@@ -315,13 +336,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       function showQlikIdentity(uid, dir) {
         self._authorDirectory = dir || null;
         $author.val(uid).hide();
-        $element.find(".qcol-send").prop("disabled", false);
-        $element.find(".qcol-identity-wait").hide().removeClass("qcol-identity-error");
-        $element.find(".qcol-me-avatar")
+        $ui.find(".qcol-send").prop("disabled", false);
+        $ui.find(".qcol-identity-wait").hide().removeClass("qcol-identity-error");
+        $ui.find(".qcol-me-avatar")
           .text(initials(uid))
           .css("background", avatarColor(uid));
-        $element.find(".qcol-me-name").text(uid);
-        $element.find(".qcol-me")
+        $ui.find(".qcol-me-name").text(uid);
+        $ui.find(".qcol-me")
           .attr("title", "Signed in through Qlik Sense as " + (dir ? dir + "\\" : "") +
                          uid + " — this name cannot be changed")
           .css("display", "flex");
@@ -334,9 +355,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       function identityBlocked(msg) {
         $author.hide();
-        $element.find(".qcol-me").hide();
-        $element.find(".qcol-identity-wait").text("⚠ " + msg).addClass("qcol-identity-error").show();
-        $element.find(".qcol-send").prop("disabled", true);
+        $ui.find(".qcol-me").hide();
+        $ui.find(".qcol-identity-wait").text("⚠ " + msg).addClass("qcol-identity-error").show();
+        $ui.find(".qcol-send").prop("disabled", true);
       }
 
       // The engine answers in one of two shapes depending on the deployment —
@@ -409,8 +430,8 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           showManualIdentity();
         } else {
           $author.hide();
-          $element.find(".qcol-me").hide();
-          $element.find(".qcol-identity-wait")
+          $ui.find(".qcol-me").hide();
+          $ui.find(".qcol-identity-wait")
             .removeClass("qcol-identity-error")
             .text("Identifying you through Qlik Sense…")
             .show();
@@ -497,7 +518,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
 
       function renderSelections(sels) {
-        var $box = $element.find(".qcol-selections");
+        var $box = $ui.find(".qcol-selections");
         // An always-present "No selections" row spent a permanent 35px saying that
         // nothing had happened. When there is nothing to report, report nothing.
         if (!sels.length) {
@@ -533,13 +554,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         });
         lines.push("--- captured for the next comment ---");
         lines.push(JSON.stringify(sels, null, 1));
-        $element.find(".qcol-debug").text(lines.join("\n")).show();
+        $ui.find(".qcol-debug").text(lines.join("\n")).show();
       }
 
-      $element.on("click", ".qcol-selections", function () {
+      $ui.on("click", ".qcol-selections", function () {
         self._debug = !self._debug;
         if (self._debug) { renderDebug(self._currentSelections); }
-        else { $element.find(".qcol-debug").hide(); }
+        else { $ui.find(".qcol-debug").hide(); }
       });
 
       function onSel() {
@@ -570,7 +591,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
 
       function renderChips() {
-        var $box = $element.find(".qcol-attachchips");
+        var $box = $ui.find(".qcol-attachchips");
         // "Whole sheet" is the default and needs no chip to announce it — the chips
         // only appear once the comment is actually pinned to something.
         if (!self._attachTargets.length) {
@@ -600,7 +621,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           self._sheetName = (props.qMetaDef && props.qMetaDef.title) ||
                             (props.qMeta && props.qMeta.title) || null;
           var cells = props.cells || [];
-          var $sel = $element.find(".qcol-attach");
+          var $sel = $ui.find(".qcol-attach");
           $sel.find("option:not(:first)").remove();
           self._cellsById = {};
           cells.forEach(function (c) {
@@ -618,13 +639,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }).catch(function () { /* edit mode / no sheet — picker stays sheet-only */ });
       renderChips();
 
-      $element.on("change", ".qcol-attach", function () {
+      $ui.on("change", ".qcol-attach", function () {
         var id = $(this).val();
         if (id) addTarget(id);
         $(this).val(""); // dropdown is an "add" tool; chips hold the state
       });
 
-      $element.on("click", ".qcol-chip-x", function (e) {
+      $ui.on("click", ".qcol-chip-x", function (e) {
         e.preventDefault();
         removeTarget($(this).data("id"));
       });
@@ -676,13 +697,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         document.removeEventListener("keydown", pickKey, true);
         clearHover();
         Object.keys(self._pickedEls).forEach(unmarkPicked);
-        $element.find(".qcol-pickhint").hide();
-        $element.find(".qcol-pick").removeClass("qcol-picking");
+        $ui.find(".qcol-pickhint").hide();
+        $ui.find(".qcol-pick").removeClass("qcol-picking");
       }
       self._stopPicking = stopPicking;
 
       function pickHover(e) {
-        if ($element[0].contains(e.target)) { clearHover(); return; }
+        if ($ui[0].contains(e.target)) { clearHover(); return; }
         var hit = findObjectId(e.target);
         if (self._hoverEl && (!hit || hit.el !== self._hoverEl)) clearHover();
         if (hit && !self._pickedEls[hit.id]) { hit.el.classList.add("qcol-pick-hover"); self._hoverEl = hit.el; }
@@ -693,7 +714,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
 
       function pickClick(e) {
-        if ($element[0].contains(e.target)) {           // clicked back in panel = finish
+        if ($ui[0].contains(e.target)) {           // clicked back in panel = finish
           stopPicking();
           // if it was the 🎯 button itself, swallow the click — otherwise its own
           // handler fires next, sees picking==false, and restarts picking mode
@@ -724,13 +745,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         for (var i = 0; i < direct.length; i++) {
           try {
             var hit = document.querySelector(direct[i]);
-            if (hit && !$element[0].contains(hit)) return hit;
+            if (hit && !$ui[0].contains(hit)) return hit;
           } catch (e) { /* invalid selector for this id - ignore */ }
         }
         var all = document.querySelectorAll("div,section,article");
         for (var j = 0; j < all.length; j++) {
           var node = all[j];
-          if ($element[0].contains(node)) continue;      // never match the panel itself
+          if ($ui[0].contains(node)) continue;      // never match the panel itself
           var attrs = node.attributes;
           for (var k = 0; k < attrs.length; k++) {
             if (attrs[k].value && attrs[k].value.indexOf(objId) !== -1) return node;
@@ -759,20 +780,20 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           : "Highlighted " + found.length + " of " + ids.length + " charts (the rest are gone)");
       }
 
-      $element.on("click", ".qcol-objtag", function (e) {
+      $ui.on("click", ".qcol-objtag", function (e) {
         e.preventDefault();
         e.stopPropagation();
         var ids = ($(this).attr("data-objs") || "").split(",").filter(Boolean);
         if (ids.length) showAttachedObjects(ids);
       });
 
-      $element.on("click", ".qcol-pick", function (e) {
+      $ui.on("click", ".qcol-pick", function (e) {
         e.preventDefault();
         if (self._picking) { stopPicking(); return; }
         loadCells().catch(function () {});   // refresh id list (objects may have changed)
         self._picking = true;
         $(this).addClass("qcol-picking");
-        $element.find(".qcol-pickhint").show();
+        $ui.find(".qcol-pickhint").show();
         document.addEventListener("click", pickClick, true);
         document.addEventListener("mouseover", pickHover, true);
         document.addEventListener("keydown", pickKey, true);
@@ -782,9 +803,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       // Pinning a comment to a chart is occasional. A permanently visible dropdown,
       // picker button and checkbox charged every sheet ~57px for the times it is not.
-      $element.on("click", ".qcol-more", function (e) {
+      $ui.on("click", ".qcol-more", function (e) {
         e.preventDefault();
-        var $extras = $element.find(".qcol-extras");
+        var $extras = $ui.find(".qcol-extras");
         $extras.toggle();
         $(this).toggleClass("qcol-open", $extras.is(":visible"));
       });
@@ -799,7 +820,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         ta.style.height = Math.min(ta.scrollHeight, isFinite(max) ? max : 108) + "px";
       }
       self._autoGrow = autoGrow;
-      $element.on("input", ".qcol-input", autoGrow);
+      $ui.on("input", ".qcol-input", autoGrow);
 
       // ---------- notifications ----------
       // Every new comment notifies everyone but its author, so the bell is a feed of
@@ -825,13 +846,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             self._notifs = list || [];
             var unread = self._notifs.filter(function (n) { return !n.isRead; }).length;
             var label = unread > 99 ? "99+" : String(unread);
-            var $badge = $element.find(".qcol-badge");
+            var $badge = $ui.find(".qcol-badge");
             if (unread > 0) $badge.text(label).show(); else $badge.hide();
             // Collapsed, the bubble is the only thing on screen — without the count on
             // it, hiding the panel would also hide the fact that anyone had written.
-            var $bub = $element.find(".qcol-bubble-badge");
+            var $bub = $ui.find(".qcol-bubble-badge");
             if (unread > 0) $bub.text(label).show(); else $bub.hide();
-            $element.find(".qcol-bubble").attr("title",
+            $ui.find(".qcol-bubble").attr("title",
               unread > 0 ? "Comments — " + unread + " new" : "Comments");
 
             // Rebuilding the open dropdown on every poll would reset its scroll
@@ -840,7 +861,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             if (payload === self._notifPayload) return;
             self._notifPayload = payload;
 
-            $element.find(".qcol-notifs-list").html(
+            $ui.find(".qcol-notifs-list").html(
               self._notifs.length
                 ? self._notifs.map(function (n) {
                     var here = n.appId === self._appId && n.sheetId === self._sheetId;
@@ -864,7 +885,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // ---------- jumping to the comment a notification points at ----------
 
       function toast(msg) {
-        var $t = $element.find(".qcol-toast");
+        var $t = $ui.find(".qcol-toast");
         $t.text(msg).stop(true, true).fadeIn(120);
         clearTimeout(self._toastTimer);
         self._toastTimer = setTimeout(function () { $t.fadeOut(300); }, 3500);
@@ -923,7 +944,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         setTimeout(function () { highlightComment(String(t.commentId)); }, 300);
       }
 
-      $element.on("click", ".qcol-notif", function () {
+      $ui.on("click", ".qcol-notif", function () {
         var $n = $(this);
         var me = $author.val().trim();
         var notifId = $n.attr("data-id");
@@ -936,16 +957,16 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             .catch(function () {});
         }
 
-        $element.find(".qcol-notifs").hide();
+        $ui.find(".qcol-notifs").hide();
         gotoComment($n.attr("data-app"), $n.attr("data-sheet"), $n.attr("data-comment"));
       });
 
-      $element.on("click", ".qcol-bell", function () {
-        $element.find(".qcol-notifs").toggle();
+      $ui.on("click", ".qcol-bell", function () {
+        $ui.find(".qcol-notifs").toggle();
         refreshNotifs();
       });
 
-      $element.on("click", ".qcol-markread", function (e) {
+      $ui.on("click", ".qcol-markread", function (e) {
         e.preventDefault();
         e.stopPropagation();
         var me = $author.val().trim();
@@ -956,7 +977,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       // dev mode only: the Qlik identity cannot be typed, so this fires only when
       // someone edits the manual name field
-      $element.on("change", ".qcol-author", function () {
+      $ui.on("change", ".qcol-author", function () {
         registerMe($author.val(), null);
         refreshNotifs();
       });
@@ -964,7 +985,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // ---------- attachments & voice (Etap 3) ----------
 
       function renderPending() {
-        var $box = $element.find(".qcol-pending");
+        var $box = $ui.find(".qcol-pending");
         if (!self._pendingFiles.length) { $box.empty().hide(); return; }
         $box.show().html(self._pendingFiles.map(function (f, i) {
           var icon = /\.webm$|\.ogg$|\.mp3$|\.m4a$|\.wav$/i.test(f.name) ? "🎤" : "📄";
@@ -973,12 +994,12 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         }).join(" "));
       }
 
-      $element.on("click", ".qcol-filebtn", function (e) {
+      $ui.on("click", ".qcol-filebtn", function (e) {
         e.preventDefault();
-        $element.find(".qcol-file").trigger("click");
+        $ui.find(".qcol-file").trigger("click");
       });
 
-      $element.on("change", ".qcol-file", function () {
+      $ui.on("change", ".qcol-file", function () {
         var files = this.files;
         for (var i = 0; i < files.length; i++) {
           self._pendingFiles.push({ file: files[i], name: files[i].name });
@@ -987,7 +1008,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         renderPending();
       });
 
-      $element.on("click", ".qcol-pending-x", function (e) {
+      $ui.on("click", ".qcol-pending-x", function (e) {
         e.preventDefault();
         self._pendingFiles.splice(parseInt($(this).data("i"), 10), 1);
         renderPending();
@@ -998,14 +1019,14 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           try { self._recorder.stop(); } catch (err) { /* already stopped */ }
           self._recorder = null;
         }
-        $element.find(".qcol-voice").removeClass("qcol-recording").text("🎤");
+        $ui.find(".qcol-voice").removeClass("qcol-recording").text("🎤");
       }
       self._stopRecording = stopRecording;
 
       // The pending strip is hidden while empty, so an error posted into it has to
       // reveal it — and hide it again afterwards if no files are queued behind it.
       function voiceError(msg) {
-        var $box = $element.find(".qcol-pending");
+        var $box = $ui.find(".qcol-pending");
         $box.find(".qcol-voicerr").remove();
         $box.show().append('<span class="qcol-chip qcol-voicerr">⚠ ' + esc(msg) + "</span>");
         setTimeout(function () {
@@ -1034,14 +1055,14 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             }
           };
           rec.start();
-          $element.find(".qcol-voice").addClass("qcol-recording").text("⏹");
+          $ui.find(".qcol-voice").addClass("qcol-recording").text("⏹");
         }).catch(function (err) {
           console.error("qlik-collaboration: microphone error", err);
           voiceError("Microphone blocked (" + (err && err.name) + ") — try Chrome at localhost:4848/hub");
         });
       }
 
-      $element.on("click", ".qcol-voice", function (e) {
+      $ui.on("click", ".qcol-voice", function (e) {
         e.preventDefault();
         if (self._recorder) stopRecording(); else startRecording();
       });
@@ -1076,7 +1097,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           (byParent[key] = byParent[key] || []).push(c);
         });
         var roots = byParent["root"] || [];
-        $element.find(".qcol-count").text("(" + comments.length + ")");
+        $ui.find(".qcol-count").text("(" + comments.length + ")");
 
         var me = $author.val().trim();
 
@@ -1209,7 +1230,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
         // Only selections with discrete values can be replayed; a range selection
         // carries nothing to store. Say so rather than attaching an empty filter.
-        var wantSel = $element.find(".qcol-selcheck").prop("checked");
+        var wantSel = $ui.find(".qcol-selcheck").prop("checked");
         var usableSel = self._currentSelections.filter(function (s) {
           return s.values && s.values.length;
         });
@@ -1247,7 +1268,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           self._pendingFiles = [];
           renderChips();
           renderPending();
-          $element.find(".qcol-replybar").hide();
+          $ui.find(".qcol-replybar").hide();
           refresh();
         }).catch(function (err) {
           // This used to fail silently: the comment vanished from nowhere the user
@@ -1261,25 +1282,25 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       // ---------- events ----------
 
-      $element.on("click", ".qcol-send", function (e) { e.preventDefault(); send(); });
-      $element.on("keydown", ".qcol-input", function (e) {
+      $ui.on("click", ".qcol-send", function (e) { e.preventDefault(); send(); });
+      $ui.on("keydown", ".qcol-input", function (e) {
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
       });
 
-      $element.on("click", ".qcol-doreply", function (e) {
+      $ui.on("click", ".qcol-doreply", function (e) {
         e.preventDefault();
         self._replyTo = parseInt($(this).data("id"), 10);
-        $element.find(".qcol-replyname").text($(this).data("author"));
-        $element.find(".qcol-replybar").show();
+        $ui.find(".qcol-replyname").text($(this).data("author"));
+        $ui.find(".qcol-replybar").show();
         $input.focus();
       });
-      $element.on("click", ".qcol-cancelreply", function (e) {
+      $ui.on("click", ".qcol-cancelreply", function (e) {
         e.preventDefault();
         self._replyTo = null;
-        $element.find(".qcol-replybar").hide();
+        $ui.find(".qcol-replybar").hide();
       });
 
-      $element.on("click", ".qcol-delete", function (e) {
+      $ui.on("click", ".qcol-delete", function (e) {
         e.preventDefault();
         var $link = $(this);
         // The actions are on screen the whole time now, so a stray click is no longer
@@ -1300,7 +1321,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       });
 
       // Etap 4: cycle status on click
-      $element.on("click", ".qcol-status", function (e) {
+      $ui.on("click", ".qcol-status", function (e) {
         e.preventDefault();
         var order = ["new", "in_progress", "fixed", "closed"];
         var current = order.filter(function (s) { return $(e.target).hasClass("qcol-status-" + s); })[0] || "new";
@@ -1604,7 +1625,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         });
       }
 
-      $element.on("click", ".qcol-applysel", function (e) {
+      $ui.on("click", ".qcol-applysel", function (e) {
         e.preventDefault();
         var sels;
         try {
@@ -1667,7 +1688,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // bubble, so a small cell is enough; expanded, it lifts out with position:fixed
       // and floats over the dashboard.
 
-      var $panel = $element.find(".qcol-panel");
+      var $panel = $ui;
 
       function bubbleWanted() {
         if (self._displayMode === "docked") return false;
@@ -1689,13 +1710,18 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         var probe = document.createElement("div");
         probe.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;" +
                               "opacity:0;pointer-events:none";
-        $panel[0].appendChild(probe);
+        // Probe where the panel will actually live. Measuring inside the cell used to
+        // report failure whenever some Qlik ancestor carried a transform — which no
+        // longer matters, because the panel is moved onto the body before it floats.
+        // Testing the old location would dock the panel for a reason that has been
+        // designed away.
+        document.body.appendChild(probe);
         var r = probe.getBoundingClientRect();
         probe.parentNode.removeChild(probe);
         self._canFloat = Math.abs(r.top) < 2 && Math.abs(r.left) < 2;
         if (!self._canFloat) {
-          console.warn("qlik-collaboration: this client anchors position:fixed to the " +
-                       "cell, so the panel cannot float — staying docked.");
+          console.warn("qlik-collaboration: position:fixed is not anchored to the " +
+                       "window on this client, so the panel cannot float — staying docked.");
         }
         return self._canFloat;
       }
@@ -1765,10 +1791,27 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
       self._styleHostCell = styleHostCell;
 
+      // Take the panel out of the Qlik cell entirely while it floats.
+      //
+      // Lifting the cell's z-index was not enough, and could not be: paint order is
+      // decided inside the nearest ancestor that forms a stacking context, and there
+      // is no reliable way to find that ancestor from in here — it may be the grid
+      // cell, or something above it, and it changes between Qlik versions. Guessing
+      // produced a bubble that still slid behind charts while being dragged.
+      //
+      // Attached to document.body there is no ancestor left to be trapped by, so the
+      // question stops being "which ancestor is it" and stops needing an answer.
+      function attachFloating(floating) {
+        var el = $panel[0];
+        var wanted = floating ? document.body : $element[0];
+        if (el.parentElement !== wanted) wanted.appendChild(el);
+      }
+
       function applyDisplayMode() {
         var bubble = bubbleWanted() && canFloat();
         $panel.toggleClass("qcol-bubbly", bubble);
         styleHostCell(bubble);
+        attachFloating(bubble);
         if (!bubble) {
           $panel.removeClass("qcol-expanded").css({ left: "", top: "" });
           return;
@@ -1782,7 +1825,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // A press that never really moves is a click; anything past a few pixels is a
       // drag. Without that distinction the bubble either cannot be moved or cannot be
       // opened, depending on which handler wins.
-      $element.on("mousedown", ".qcol-bubble", function (e) {
+      $ui.on("mousedown", ".qcol-bubble", function (e) {
         if (e.button !== 0 || self._expanded) return;
         e.preventDefault();
         var startX = e.clientX, startY = e.clientY;
@@ -1842,12 +1885,12 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       // No click handler on the bubble: mousedown above decides between opening and
       // dragging, and a click would fire on mouseup after a drag and reopen it.
-      $element.on("click", ".qcol-collapse", function (e) {
+      $ui.on("click", ".qcol-collapse", function (e) {
         e.preventDefault();
         setExpanded(false);
       });
       // Esc closes it, the way every overlay on the web does.
-      $element.on("keydown", function (e) {
+      $ui.on("keydown", function (e) {
         if (e.key === "Escape" && self._expanded && !self._picking) setExpanded(false);
       });
 
@@ -1881,7 +1924,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       if (typeof ResizeObserver === "function") {
         try {
           self._resizeObserver = new ResizeObserver(applySize);
-          self._resizeObserver.observe($element[0]);
+          self._resizeObserver.observe($ui[0]);
         } catch (e) { /* older client — Qlik's own repaint-on-resize covers it */ }
       }
       applySize();
@@ -1910,6 +1953,11 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // object's container, which outlives this extension when the sheet changes.
       if (this._styleHostCell) {
         try { this._styleHostCell(false); } catch (e) { /* noop */ }
+      }
+      // The panel lives on document.body while floating, which outlives this object.
+      // Qlik removes the cell for us; it has no idea about that node.
+      if (this._panelEl && this._panelEl.parentElement === document.body) {
+        try { document.body.removeChild(this._panelEl); } catch (e) { /* noop */ }
       }
       if (this._stopPicking) this._stopPicking();
       if (this._stopRecording) this._stopRecording();
