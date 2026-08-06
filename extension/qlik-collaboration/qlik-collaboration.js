@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.12.0";
+  var EXT_VERSION = "0.12.1";
 
   function esc(text) {
     return String(text)
@@ -244,19 +244,12 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '    </div>' +
         '    <div class="qcol-identity-wait" style="display:none">Identifying you through Qlik Sense…</div>' +
         '    <input class="qcol-author" type="text" placeholder="Your name" maxlength="60"/>' +
-        '    <div class="qcol-extras" style="display:none">' +
-        '      <div class="qcol-attachrow">' +
-        '        <select class="qcol-attach"><option value="">attach to a chart…</option></select>' +
-        '        <button class="qcol-pick" title="Click charts on the sheet to attach the comment to them">🎯</button>' +
-        '      </div>' +
-        '      <label class="qcol-withsel"><input type="checkbox" class="qcol-selcheck" checked/> attach current selections</label>' +
-        '    </div>' +
         '    <div class="qcol-attachchips" style="display:none"></div>' +
         '    <div class="qcol-pickhint" style="display:none">Click charts to attach/detach… (Esc or 🎯 to finish)</div>' +
         '    <textarea class="qcol-input" placeholder="Write a comment — everyone sees it" rows="1"></textarea>' +
         '    <div class="qcol-pending"></div>' +
         '    <div class="qcol-toolbar">' +
-        '      <button class="qcol-more" title="Attach the comment to charts or to the current selections">＋</button>' +
+        '      <button class="qcol-pick" title="Attach this comment to charts: click them on the sheet">🎯</button>' +
         '      <button class="qcol-filebtn" title="Attach files">📎</button>' +
         '      <button class="qcol-voice" title="Record a voice message">🎤</button>' +
         '      <input type="file" class="qcol-file" multiple style="display:none"/>' +
@@ -634,13 +627,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           self._sheetName = (props.qMetaDef && props.qMetaDef.title) ||
                             (props.qMeta && props.qMeta.title) || null;
           var cells = props.cells || [];
-          var $sel = $ui.find(".qcol-attach");
-          $sel.find("option:not(:first)").remove();
+          // The dropdown is gone; this list is not. A click on the sheet is only
+          // accepted when the id under the cursor is one of these, so a Qlik markup
+          // change can disable the shortcut but never attach to the wrong chart.
           self._cellsById = {};
           cells.forEach(function (c) {
-            if (c.name === layout.qInfo.qId) return; // don't offer the panel itself
+            if (c.name === layout.qInfo.qId) return;   // never the panel itself
             self._cellsById[c.name] = c;
-            $sel.append('<option value="' + esc(c.name) + '">📊 ' + esc(c.type) + " (" + esc(c.name.substring(0, 8)) + ")</option>");
           });
         });
       }
@@ -651,12 +644,6 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         refresh();
       }).catch(function () { /* edit mode / no sheet — picker stays sheet-only */ });
       renderChips();
-
-      $ui.on("change", ".qcol-attach", function () {
-        var id = $(this).val();
-        if (id) addTarget(id);
-        $(this).val(""); // dropdown is an "add" tool; chips hold the state
-      });
 
       $ui.on("click", ".qcol-chip-x", function (e) {
         e.preventDefault();
@@ -816,12 +803,6 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       // Pinning a comment to a chart is occasional. A permanently visible dropdown,
       // picker button and checkbox charged every sheet ~57px for the times it is not.
-      $ui.on("click", ".qcol-more", function (e) {
-        e.preventDefault();
-        var $extras = $ui.find(".qcol-extras");
-        $extras.toggle();
-        $(this).toggleClass("qcol-open", $extras.is(":visible"));
-      });
 
       // Grow the box to the text instead of reserving two rows in advance. The cap
       // comes from the stylesheet so the shorter limit under .qcol-short applies too.
@@ -1244,7 +1225,10 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
         // Only selections with discrete values can be replayed; a range selection
         // carries nothing to store. Say so rather than attaching an empty filter.
-        var wantSel = $ui.find(".qcol-selcheck").prop("checked");
+        // Always. The checkbox that gated this was on by default and nobody turned it
+        // off; what it mostly achieved was letting a comment be saved without the
+        // filters that give it its meaning.
+        var wantSel = true;
         var usableSel = self._currentSelections.filter(function (s) {
           return s.values && s.values.length;
         });

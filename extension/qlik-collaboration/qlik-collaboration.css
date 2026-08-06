@@ -3,11 +3,10 @@
 
    Design rule: nothing permanent that carries no information.
    Rows that used to sit there empty — "No selections", "Whole
-   sheet", the attach dropdown, the identity card — are either
-   hidden until they say something or folded into the ＋ drawer.
-   That is where the space comes from, NOT from smaller type:
-   the panel lives in a sheet cell, so text stays readable and
-   the chrome gives way instead.
+   sheet", the identity card — are hidden until they say
+   something. That is where the space comes from, NOT from
+   smaller type: the panel lives in a sheet cell, so text stays
+   readable and the chrome gives way instead.
    ============================================================ */
 
 .qcol-panel {
@@ -439,7 +438,7 @@
 }
 .qcol-identity-error { background: #fdecec; border-color: #f5c2c2; color: #c02626; }
 
-.qcol-author, .qcol-attach {
+.qcol-author {
   box-sizing: border-box;
   border: 1px solid #d8dce1;
   border-radius: 6px;
@@ -449,42 +448,13 @@
   color: var(--qcol-ink);
 }
 .qcol-author { width: 100%; margin-bottom: 5px; }
-.qcol-author:focus, .qcol-attach:focus { outline: none; border-color: var(--qcol-green); }
+.qcol-author:focus { outline: none; border-color: var(--qcol-green); }
 .qcol-author.qcol-invalid { border-color: #dc2626; }
 
-/* ---------- ＋ drawer ----------
-   Attaching a comment to a chart is occasional; a permanent dropdown, picker
-   button and checkbox cost ~57px on every sheet for the times it is not. */
-
-.qcol-extras {
-  border: 1px solid var(--qcol-line);
-  border-radius: 6px;
-  padding: 6px;
-  margin-bottom: 5px;
-  background: #fafbfc;
-}
-.qcol-attachrow { display: flex; gap: 5px; }
-.qcol-attach { flex: 1; min-width: 0; }
-.qcol-pick {
-  border: 1px solid #d8dce1;
-  border-radius: 6px;
-  background: var(--qcol-card);
-  cursor: pointer;
-  padding: 2px 9px;
-  font-size: 13px;
-}
-.qcol-pick:hover { border-color: var(--qcol-green); }
-.qcol-pick.qcol-picking { background: var(--qcol-green); border-color: var(--qcol-green); }
-
-.qcol-withsel {
-  display: block;
-  color: var(--qcol-muted);
-  margin-top: 6px;
-  cursor: pointer;
-  font-size: 11.5px;
-}
-.qcol-withsel input { vertical-align: middle; margin-right: 5px; accent-color: var(--qcol-green); }
-
+/* The picker sits in the toolbar with the other actions. It used to live in a
+   drawer behind a ＋, along with a chart dropdown and a checkbox for attaching the
+   current selections — three controls for what is now one button and one rule
+   (selections are always attached). */
 .qcol-attachchips, .qcol-pending { margin-bottom: 5px; line-height: 19px; }
 .qcol-chip-obj { background: #e6f6ec; color: #1e7e40; }
 .qcol-chip-file { background: #fef3e2; color: #b26a00; }
@@ -528,7 +498,7 @@
 .qcol-input::placeholder { color: var(--qcol-faint); }
 
 .qcol-toolbar { display: flex; gap: 5px; }
-.qcol-more, .qcol-filebtn, .qcol-voice {
+.qcol-pick, .qcol-filebtn, .qcol-voice {
   flex: none;
   border: 1px solid #d8dce1;
   border-radius: 6px;
@@ -538,8 +508,12 @@
   font-size: 13px;
   line-height: 1.2;
 }
-.qcol-more:hover, .qcol-filebtn:hover, .qcol-voice:hover { border-color: var(--qcol-green); }
-.qcol-more.qcol-open { background: #e6f6ec; border-color: var(--qcol-green); }
+.qcol-pick:hover, .qcol-filebtn:hover, .qcol-voice:hover { border-color: var(--qcol-green); }
+/* picking mode is a state you must be able to see you are in */
+.qcol-pick.qcol-picking {
+  background: var(--qcol-green);
+  border-color: var(--qcol-green);
+}
 .qcol-voice.qcol-recording {
   background: #dc2626;
   border-color: #dc2626;
