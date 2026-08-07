@@ -30,7 +30,10 @@ services:
 
   api:
     build:
-      context: ./backend/QlikCollaboration.Api
+      # repository root: the project embeds database/schema.sql, which is
+      # outside the project folder
+      context: .
+      dockerfile: backend/QlikCollaboration.Api/Dockerfile
     image: qlik-collaboration-api:latest
     container_name: qlikcollab-api
     restart: unless-stopped

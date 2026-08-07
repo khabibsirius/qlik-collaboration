@@ -15,11 +15,13 @@
 services:
   api:
     build:
-      context: ./backend/QlikCollaboration.Api
+      # repository root: the project embeds database/schema.sql, which is
+      # outside the project folder
+      context: .
       # Dockerfile.prebuilt (default) needs `dotnet publish -o publish` first and
       # pulls only the ~215 MB runtime image; Dockerfile builds inside Docker but
       # also pulls a ~800 MB SDK image. deploy\docker-deploy.ps1 sets this.
-      dockerfile: ${DOCKERFILE:-Dockerfile.prebuilt}
+      dockerfile: backend/QlikCollaboration.Api/${DOCKERFILE:-Dockerfile.prebuilt}
       args:
         RUNTIME_IMAGE: ${RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:8.0}
     image: qlik-collaboration-api:latest

@@ -15,7 +15,7 @@ ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:8.0
 FROM ${RUNTIME_IMAGE}
 
 WORKDIR /app
-COPY publish/ ./
+COPY backend/QlikCollaboration.Api/publish/ ./
 
 # Listen address; the attachments path is set per-mode by the compose file
 # (/data/uploads on Linux, C:\data\uploads on Windows).

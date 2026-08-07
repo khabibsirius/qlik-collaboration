@@ -16,11 +16,13 @@
 services:
   api:
     build:
-      context: ./backend/QlikCollaboration.Api
+      # repository root: the project embeds database/schema.sql, which is
+      # outside the project folder
+      context: .
       # Dockerfile.prebuilt (default) needs `dotnet publish -o publish` first and
       # pulls only the ~300 MB runtime image. Dockerfile.windows builds inside
       # Docker instead, but pulls a ~6-8 GB Server Core SDK image.
-      dockerfile: ${DOCKERFILE:-Dockerfile.prebuilt}
+      dockerfile: backend/QlikCollaboration.Api/${DOCKERFILE:-Dockerfile.prebuilt}
       args:
         WINDOWS_TAG: ${WINDOWS_TAG:-ltsc2022}
         RUNTIME_IMAGE: ${RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:8.0-nanoserver-ltsc2022}

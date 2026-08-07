@@ -1,0 +1,26 @@
+# Build context is the repository root, because the API project embeds
+# database/schema.sql and that lives outside the project folder. Everything the
+# image does not need is excluded here so the context stays small.
+
+.git/
+.github/
+.claude/
+.vs/
+.vscode/
+
+# build output — the image builds its own
+**/bin/
+**/obj/
+**/*.user
+
+# the Qlik extension is imported into the QMC, never into this image
+extension/
+dist/
+docs/
+mail-drop/
+*.zip
+
+# local only
+.env
+**/appsettings.Development.json
+**/uploads/
