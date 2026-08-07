@@ -30,6 +30,24 @@ public static class SchemaGuard
         ("digest_runs", null,         "the e-mail digest")
     ];
 
+    /// <summary>
+    /// Indexes the data depends on for its meaning, not merely for speed. This one
+    /// keeps one row per person however their name is capitalised; without it two rows
+    /// exist for the same person and the role lookup returns whichever it finds first.
+    /// Checked separately because schema.sql cannot build it while such a pair exists,
+    /// and warns and carries on rather than failing — easy to miss in a long log.
+    /// </summary>
+    private static readonly (string Name, string Purpose)[] RequiredIndexes =
+    [
+        ("idx_users_username_lower", "one user row per person regardless of capitalisation")
+    ];
+
+    /// <summary>Names differing only in case — what blocks that index.</summary>
+    public static async Task<List<string>> DuplicateNamesAsync(NpgsqlConnection conn) =>
+        (await conn.QueryAsync<string>(
+            @"SELECT string_agg(username, ' and ' ORDER BY username)
+              FROM users GROUP BY lower(username) HAVING count(*) > 1")).ToList();
+
     public static async Task<List<string>> MissingAsync(NpgsqlConnection conn)
     {
         var missing = new List<string>();
@@ -48,6 +66,7 @@ public static class SchemaGuard
                 missing.Add(column is null ? $"table {table} ({feature})"
                                            : $"{table}.{column} ({feature})");
         }
+
         return missing;
     }
 
@@ -76,6 +95,31 @@ public static class SchemaGuard
     public static async Task<bool> EnsureAsync(NpgsqlDataSource db, bool autoApply, ILogger log)
     {
         await using var conn = await db.OpenConnectionAsync();
+
+        // Advisory, not fatal. Nothing in the code needs this index any more — user
+        // registration updates-then-inserts rather than relying on ON CONFLICT — so a
+        // database without it still serves comments correctly. What it costs is
+        // certainty about roles for the duplicated person, which is worth saying every
+        // time and not worth refusing to start over.
+        foreach (var (name, purpose) in RequiredIndexes)
+        {
+            var hasIndex = await conn.ExecuteScalarAsync<bool>(
+                "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = @name)", new { name });
+            if (hasIndex) continue;
+
+            var dups = await DuplicateNamesAsync(conn);
+            if (dups.Count > 0)
+                log.LogWarning(
+                    "users holds {Count} name(s) differing only in capitalisation: {Pairs}. " +
+                    "The {Index} index cannot be built while they exist, so the schema skips " +
+                    "it and that person's role is whichever row is found first. Merge each " +
+                    "pair — keep the spelling Qlik reports — then re-run the schema.",
+                    dups.Count, string.Join("; ", dups), name);
+            else
+                log.LogWarning("Index {Index} is missing ({Purpose}). Re-run the schema to add it.",
+                               name, purpose);
+        }
+
         var missing = await MissingAsync(conn);
         if (missing.Count == 0) return true;
 
@@ -95,11 +139,12 @@ public static class SchemaGuard
             return false;
         }
 
+        var nl = Environment.NewLine;
         log.LogCritical(
-            "This build needs database changes that are not there yet: {Missing}.\n" +
+            "This build needs database changes that are not there yet: {Missing}." + nl +
             "Apply them once — the file is idempotent, so it is safe on a live database " +
-            "and keeps every existing comment:\n" +
-            "    psql -U postgres -d qlik_collaboration -f database/schema.sql\n" +
+            "and keeps every existing comment:" + nl +
+            "    psql -U postgres -d qlik_collaboration -f database/schema.sql" + nl +
             "Or set Database:ApplySchemaOnStart=true (env: Database__ApplySchemaOnStart=true) " +
             "to let the API apply it itself at startup.",
             string.Join("; ", missing));

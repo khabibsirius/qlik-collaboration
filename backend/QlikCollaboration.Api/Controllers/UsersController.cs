@@ -61,12 +61,8 @@ public class UsersController : ControllerBase
         var username = dto.Username.Trim();
 
         await using var conn = await _db.OpenConnectionAsync();
-        await conn.ExecuteAsync(
-            @"INSERT INTO users (username, display_name, user_directory)
-              VALUES (@username, @username, @directory)
-              ON CONFLICT (lower(username)) DO UPDATE
-                SET user_directory = COALESCE(EXCLUDED.user_directory, users.user_directory)",
-            new { username, directory = string.IsNullOrWhiteSpace(dto.UserDirectory) ? null : dto.UserDirectory.Trim() });
+        await UserRoles.EnsureUser(conn, username,
+            string.IsNullOrWhiteSpace(dto.UserDirectory) ? null : dto.UserDirectory.Trim());
 
         // Answer with the role. The panel registers on every load anyway, so this
         // saves a second round trip and is the only way it can know whether to offer

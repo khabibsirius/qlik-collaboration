@@ -121,12 +121,8 @@ public class CommentsController : ControllerBase
         // sends the Qlik-authenticated identity (AD via Qlik Proxy); on Desktop
         // it is a typed name. The directory is recorded for audit and refreshed
         // if a user who first appeared manually later arrives authenticated.
-        await conn.ExecuteAsync(
-            @"INSERT INTO users (username, display_name, user_directory)
-              VALUES (@author, @author, @directory)
-              ON CONFLICT (lower(username)) DO UPDATE
-                SET user_directory = COALESCE(EXCLUDED.user_directory, users.user_directory)",
-            new { author, directory = string.IsNullOrWhiteSpace(dto.AuthorDirectory) ? null : dto.AuthorDirectory.Trim() }, tx);
+        await UserRoles.EnsureUser(conn, author,
+            string.IsNullOrWhiteSpace(dto.AuthorDirectory) ? null : dto.AuthorDirectory.Trim(), tx);
 
         var id = await conn.ExecuteScalarAsync<int>(
             @"INSERT INTO comments (app_id, sheet_id, app_name, sheet_name,

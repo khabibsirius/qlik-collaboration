@@ -47,6 +47,34 @@ public class UserRoles
     }
 
     /// <summary>
+    /// Record a user, without needing a unique index to exist.
+    ///
+    /// The obvious ON CONFLICT (lower(username)) requires the expression index, and
+    /// schema.sql deliberately refuses to build that when the table already holds two
+    /// names differing only in case. The result was 42P10 on every single comment: a
+    /// data-hygiene problem turned into a hard failure of the main feature.
+    /// Update-then-insert needs no index at all.
+    ///
+    /// The plain UNIQUE(username) constraint still guards the race where two requests
+    /// insert the same spelling at once; one of them loses, which is correct.
+    /// </summary>
+    public static async Task EnsureUser(
+        NpgsqlConnection conn, string username, string? directory, NpgsqlTransaction? tx = null)
+    {
+        var updated = await conn.ExecuteAsync(
+            @"UPDATE users SET user_directory = COALESCE(@directory, user_directory)
+              WHERE lower(username) = lower(@username)",
+            new { username, directory }, tx);
+
+        if (updated == 0)
+            await conn.ExecuteAsync(
+                @"INSERT INTO users (username, display_name, user_directory)
+                  SELECT @username, @username, @directory
+                  WHERE NOT EXISTS (SELECT 1 FROM users WHERE lower(username) = lower(@username))",
+                new { username, directory }, tx);
+    }
+
+    /// <summary>
     /// Everyone who should be notified about any comment: the team and the admins.
     /// A guest hears only about their own threads, handled by the caller.
     /// </summary>
