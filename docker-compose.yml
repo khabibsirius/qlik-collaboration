@@ -1,9 +1,3 @@
-# Qlik Collaboration — full stack.
-#   copy .env.example to .env, set the password, then:  docker compose up -d
-#
-# Data lives in named volumes, NOT in the containers: `docker compose down`
-# keeps comments and attachments, only `down -v` destroys them.
-
 services:
   db:
     image: postgres:16-alpine
@@ -15,7 +9,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # runs once, on an empty data directory, to create the tables
       - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-qlik} -d qlik_collaboration"]
@@ -23,15 +16,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
-    # Not published to the host by default — only the API needs to reach it.
-    # Uncomment to inspect the database from outside:
-    # ports:
-    #   - "5433:5432"
 
   api:
     build:
-      # repository root: the project embeds database/schema.sql, which is
-      # outside the project folder
       context: .
       dockerfile: backend/QlikCollaboration.Api/Dockerfile
     image: qlik-collaboration-api:latest
@@ -42,13 +29,14 @@ services:
         condition: service_healthy
     environment:
       ConnectionStrings__Postgres: "Host=db;Port=5432;Database=qlik_collaboration;Username=${POSTGRES_USER:-qlik};Password=${POSTGRES_PASSWORD}"
-      # One indexed variable per origin (__0, __1, ...); a comma-separated list in a
-      # single variable is accepted too. Leave unset to allow any origin (dev only).
       Cors__AllowedOrigins__0: ${QLIK_ORIGIN:-*}
       Qlik__BaseUrl: ${QLIK_BASE_URL:-}
       Database__ApplySchemaOnStart: ${DB_APPLY_SCHEMA:-false}
       Swagger__Enabled: "${SWAGGER_ENABLED:-true}"
       ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: "http://+:5000"
+      Storage__AttachmentsPath: "/data/uploads"
+      DOTNET_SYSTEM_GLOBALIZATION_PREDEFINED_CULTURES_ONLY: "false"
     ports:
       - "${API_PORT:-5000}:5000"
     volumes:
