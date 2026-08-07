@@ -26,7 +26,15 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.13.1";
+  var EXT_VERSION = "0.13.3";
+
+  // The backend address is typed by hand into the property panel, and pasting it out
+  // of a browser bar brings a trailing slash with it. Left alone, every call then goes
+  // to "http://host:5000//api/comments", which is a 404 on a server that is running
+  // perfectly — so trim it here rather than explain it in the install guide.
+  function normalizeApiUrl(value) {
+    return String(value == null ? "" : value).trim().replace(/\/+$/, "");
+  }
 
   function esc(text) {
     return String(text)
@@ -162,7 +170,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
     paint: function ($element, layout) {
       var self = this;
       var app = qlik.currApp(this);
-      var apiUrl = (layout.collab && layout.collab.apiUrl) || "http://localhost:5000";
+      var apiUrl = normalizeApiUrl(layout.collab && layout.collab.apiUrl) || "http://localhost:5000";
       var pollMs = ((layout.collab && layout.collab.pollSeconds) || 3) * 1000;
       var identityMode = (layout.collab && layout.collab.identityMode) || "auto";
       var displayMode = (layout.collab && layout.collab.displayMode) || "bubble";
@@ -193,6 +201,32 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
       self._built = true;
       console.log("qlik-collaboration v" + EXT_VERSION + " loaded");
+
+      // Qlik Sense Enterprise ships a Content Security Policy, editable in the QMC,
+      // and until the backend is listed in connect-src it blocks every call the panel
+      // makes. The block happens in the browser, so the request never leaves and
+      // fetch() rejects exactly as it does for a backend that is switched off — which
+      // is why this is the single most misdiagnosed failure of an Enterprise rollout.
+      //
+      // The browser does say so, though, on this event. Recording it turns the guess
+      // into a fact: if a policy blocked our own address moments before a request
+      // failed, that is the reason, and the panel can name the QMC screen to fix it.
+      self._cspBlock = null;
+      if (!self._cspWatching) {
+        self._cspWatching = true;
+        window.addEventListener("securitypolicyviolation", function (e) {
+          // connect-src violations report the origin rather than the full URL, so
+          // compare origins. Anything else on the page (a font, an image) is not ours.
+          var blocked = String(e.blockedURI || "");
+          if (blocked && self._apiUrl && self._apiUrl.indexOf(blocked.replace(/\/+$/, "")) === 0) {
+            self._cspBlock = {
+              directive: e.effectiveDirective || e.violatedDirective || "connect-src",
+              at: new Date().getTime()
+            };
+          }
+        });
+      }
+
       self._apiUrl = apiUrl;
       self._app = app;
       self._replyTo = null;
@@ -1144,13 +1178,56 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // ---------- data ----------
 
       // fetch() rejects with a TypeError when the request never reached a server at
-      // all — backend down, wrong port, blocked by the Enterprise CSP. That is a very
-      // different problem from a server that answered and said no, so name it.
+      // all, and the browser deliberately refuses to say why: mixed content, an API
+      // that is not listening, an address that means something different in the
+      // user's browser than it did on the developer's machine, or a CORS allowlist
+      // that does not name this page all arrive here identically.
+      //
+      // Listing all four every time is what this used to do, and it sent people to
+      // check the firewall and the database because of a trailing slash in one
+      // setting. Three of the four are decidable from here, so decide them, and
+      // where the cause cannot be narrowed print the two addresses that have to
+      // agree — the API's, and the origin its allowlist has to contain.
       function describeFetchError(err) {
-        if (err instanceof TypeError) return "no response — backend down, wrong URL, or blocked by the Qlik CSP";
-        // The message is now the server's own explanation where there is one, so pass
-        // it through instead of wrapping a status code around it.
-        return (err && err.message) ? err.message : "unknown error";
+        if (!(err instanceof TypeError)) {
+          // The server's own explanation where there is one, passed through rather
+          // than wrapped in a status code.
+          return (err && err.message) ? err.message : "unknown error";
+        }
+
+        var api = self._apiUrl;
+        var origin = window.location.origin ||
+                     (window.location.protocol + "//" + window.location.host);
+
+        // Qlik Sense Enterprise is served over HTTPS. A browser will not let an
+        // HTTPS page call a plain HTTP address, and blocks it before it is sent.
+        if (window.location.protocol === "https:" && /^http:\/\//i.test(api)) {
+          return "the sheet is served over HTTPS and the API address is http:// — the " +
+                 "browser blocks that (mixed content). Give the API an https:// address";
+        }
+
+        // The default. It works on the machine the backend runs on and nowhere else:
+        // in each user's browser "localhost" is that user's own PC.
+        var apiIsLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(api);
+        var pageIsLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(origin);
+        if (apiIsLocal && !pageIsLocal) {
+          return "the API address is still " + api + ", and in each user's browser that " +
+                 "means their own PC rather than the server. Set it to the server's " +
+                 "address in the panel's settings";
+        }
+
+        // Reported by the browser itself, moments ago, about our own address — this
+        // is not an inference.
+        if (self._cspBlock && (new Date().getTime() - self._cspBlock.at) < 5000) {
+          return "Qlik's Content Security Policy blocked the call to " + api + " (" +
+                 self._cspBlock.directive + "). In the QMC: Content Security Policy → " +
+                 "add connect-src for " + api + ", and the ws:// or wss:// form of the " +
+                 "same address for live updates";
+        }
+
+        return "no response from " + api + " — either it is not running or not reachable " +
+               "from here, or its allowed-origins list does not include " + origin +
+               " (QLIK_ORIGIN on the server). " + api + "/api/diagnostics shows which";
       }
 
       function refresh() {
@@ -1192,8 +1269,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           // that is actually wrong.
           .catch(function (err) {
             $conn.addClass("qcol-err").removeClass("qcol-ok")
-                 .attr("title", "Cannot reach the backend at " + self._apiUrl +
-                                " — is it running? (" + describeFetchError(err) + ")");
+                 .attr("title", "Cannot load the discussion: " + describeFetchError(err));
           });
       }
 

@@ -19,11 +19,13 @@ public class DiagnosticsController : ControllerBase
 {
     private readonly NpgsqlDataSource _db;
     private readonly IConfiguration _config;
+    private readonly CorsOrigins _cors;
 
-    public DiagnosticsController(NpgsqlDataSource db, IConfiguration config)
+    public DiagnosticsController(NpgsqlDataSource db, IConfiguration config, CorsOrigins cors)
     {
         _db = db;
         _config = config;
+        _cors = cors;
     }
 
     [HttpGet]
@@ -78,7 +80,13 @@ public class DiagnosticsController : ControllerBase
             database,
             config = new
             {
-                cors = _config.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [],
+                // What is actually enforced, not what was typed — a trailing slash or
+                // a path in the setting is the whole failure, and printing the raw
+                // value back hides it. corsRejected lists values that are not usable
+                // origins at all.
+                cors = _cors.AllowAny ? new[] { "*" } : _cors.Allowed.ToArray(),
+                corsCorrected = _cors.Corrected.Select(c => $"{c.Configured} -> {c.Used}").ToArray(),
+                corsRejected = _cors.Rejected.ToArray(),
                 qlikBaseUrl = _config["Qlik:BaseUrl"] ?? "",
                 applySchemaOnStart = _config.GetValue("Database:ApplySchemaOnStart", false),
                 seedAdmins = _config.GetSection("Team:Admins").Get<string[]>() ?? [],

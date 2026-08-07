@@ -39,8 +39,8 @@ services:
         condition: service_healthy
     environment:
       ConnectionStrings__Postgres: "Host=db;Port=5432;Database=qlik_collaboration;Username=${POSTGRES_USER:-qlik};Password=${POSTGRES_PASSWORD}"
-      # Comma-separated list is not supported — one indexed variable per origin.
-      # Leave unset to allow any origin (development only).
+      # One indexed variable per origin (__0, __1, ...); a comma-separated list in a
+      # single variable is accepted too. Leave unset to allow any origin (dev only).
       Cors__AllowedOrigins__0: ${QLIK_ORIGIN:-*}
       Qlik__BaseUrl: ${QLIK_BASE_URL:-}
       Database__ApplySchemaOnStart: ${DB_APPLY_SCHEMA:-false}

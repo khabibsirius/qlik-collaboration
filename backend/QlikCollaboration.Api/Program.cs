@@ -35,18 +35,21 @@ builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 // Browsers call this API from the Qlik client origin: http://localhost:4848 on
 // Desktop, the Qlik Proxy host on Enterprise. Leave Cors:AllowedOrigins empty (or
 // "*") for development; list the Qlik hosts in production.
-var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
-var allowAnyOrigin = allowedOrigins.Length == 0 || allowedOrigins.Contains("*");
+//
+// CorsOrigins compares normalised origins rather than raw strings, because a
+// trailing slash on this setting refuses every write from the panel and says so to
+// nobody — see the note there.
+var corsOrigins = new CorsOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>());
+builder.Services.AddSingleton(corsOrigins);
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 {
-    if (allowAnyOrigin) p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
-    else p.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
+    if (corsOrigins.AllowAny) p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+    else p.SetIsOriginAllowed(corsOrigins.IsAllowed).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
 }));
 
 var app = builder.Build();
 
-app.Logger.LogInformation("CORS: {Policy}",
-    allowAnyOrigin ? "any origin (development)" : string.Join(", ", allowedOrigins));
+corsOrigins.ReportAtStartup(app.Logger);
 
 // The database has to have the columns this build uses before anything reads them.
 // Upgrading the app does not upgrade the database: schema.sql is applied by hand, and
@@ -150,6 +153,34 @@ app.MapGet("/health", async (NpgsqlDataSource db, ILogger<Program> log) =>
         log.LogError(ex, "Health check failed: database unreachable");
         return Results.Json(new { status = "unhealthy", database = "down" }, statusCode: 503);
     }
+});
+
+// Where this process is actually listening, and whether anyone else can reach it.
+// With no ASPNETCORE_URLS the default is localhost only, which serves the server's
+// own browser perfectly and is invisible to every user workstation — and the panel
+// reports that as "no response", the same words it uses for a backend that is down.
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    var addresses = app.Urls.ToArray();
+    if (addresses.Length == 0) return;          // hosted differently (IIS, tests)
+
+    app.Logger.LogInformation("Listening on {Addresses}", string.Join(", ", addresses));
+
+    var loopbackOnly = addresses.All(a =>
+        Uri.TryCreate(a, UriKind.Absolute, out var u) &&
+        (u.IsLoopback || u.Host is "localhost"));
+
+    // Correct for Qlik Sense Desktop, where the browser is on this machine too — so
+    // this says what it means rather than asserting something is broken.
+    if (loopbackOnly && !app.Environment.IsDevelopment())
+        app.Logger.LogWarning(
+            "This API is bound to {Addresses} — loopback only, so it can be reached from " +
+            "this machine and from nowhere else. That is right for Qlik Sense Desktop on " +
+            "this same machine. It is wrong for a server: the extension runs in each " +
+            "user's own browser, so every panel would report that the backend did not " +
+            "answer. For a server set ASPNETCORE_URLS=http://0.0.0.0:5000 and open the " +
+            "port in the firewall.",
+            string.Join(", ", addresses));
 });
 
 app.Run();

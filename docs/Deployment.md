@@ -263,6 +263,54 @@ A failed request also carries its reason now: the panel shows the database's own
 message instead of "server answered 500", so the log is no longer the only place the
 cause exists.
 
+### "Comment NOT sent — no response"
+
+The panel says this when the browser never got an answer at all. The browser will not
+say why — the same silence covers four different causes — so the panel narrows it
+down and prints the one that fits. Read the whole line: it names the cause.
+
+Note that reading the discussion can keep working while sending fails, which makes
+this look like a problem with saving comments. It is not. A `GET` is a plain request
+that a browser sends without asking permission first; sending a comment is a `POST`
+with a JSON body, which the browser only sends after the API has agreed to it. So the
+first setting to get wrong is the one that decides who may call the API.
+
+| What the panel says | What is wrong | Fix |
+|---|---|---|
+| `...allowed-origins list does not include https://qlik.bank.local` | The API is running and reachable, but its allowlist does not name the address users open Qlik at | Set `QLIK_ORIGIN` to exactly that origin — scheme, host and port, no path, no trailing slash — and restart the API |
+| `...the browser blocks that (mixed content)` | Qlik is on HTTPS and the panel's API address is `http://` | Put the API behind HTTPS (see [HTTPS](#https)) and set the panel's address to `https://...` |
+| `...means their own PC rather than the server` | The panel's **Backend API URL** is still `http://localhost:5000` | Set it to the server's address in the sheet's property panel, under Collaboration |
+| `no response from http://... — either it is not running or not reachable` | Nothing is listening there, or a firewall is in the way | `curl.exe http://<server>:5000/health` from a *user's* workstation, not from the server |
+
+Two checks settle it in a minute:
+
+```powershell
+# from a USER's workstation — proves the address, the firewall and the API at once
+curl.exe http://<server>:5000/api/diagnostics
+```
+
+`config.cors` in that output is the allowlist **actually in force**, which is not
+always what was typed: `corsCorrected` lists values that had to be cleaned up (a
+trailing slash, a path, odd casing — all now tolerated) and `corsRejected` lists any
+that were not usable origins at all and were ignored.
+
+The API log names the other side of the same question. Every origin it turns away is
+logged once:
+
+```
+warn: Refused a browser request from origin https://qlik.bank.local because it is not
+      in Cors:AllowedOrigins (https://qlik.test.local). ...
+```
+
+and at startup it says where it is actually listening — a bare `dotnet run` with no
+`ASPNETCORE_URLS` binds to loopback only, which serves the server's own browser
+perfectly and is invisible to every workstation:
+
+```
+warn: This API is bound to http://127.0.0.1:5000 — loopback only, so it can be
+      reached from this machine and from nowhere else. ...
+```
+
 ### Upgrading an existing installation
 
 **Upgrading the API does not upgrade the database.** `schema.sql` is applied by hand

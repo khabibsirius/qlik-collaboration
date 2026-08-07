@@ -87,20 +87,51 @@ recommendation; the central node is the acceptable shortcut for a pilot.
 
 ## Step-by-step
 
+**Everything below assumes HTTPS.** An Enterprise hub is served over HTTPS, and a
+browser will not let an HTTPS page call an `http://` address — it blocks the request
+before it is sent, and the panel can only report that nothing answered. Give the
+backend a certificate (or a TLS-terminating proxy) *first*; every address in the rest
+of these steps is then `https://` and `wss://`. See
+[Deployment.md → HTTPS](Deployment.md#https).
+
 1. **Backend server**
    - Install .NET 8 (runtime is enough), PostgreSQL.
    - `psql -f database/schema.sql` into a `qlik_collaboration` database.
    - Set the connection string + `Storage:AttachmentsPath` in `appsettings.json`.
+   - Set `Cors:AllowedOrigins:0` (env `QLIK_ORIGIN`) to the **hub's own origin** —
+     the address users have in the browser bar, e.g. `https://qlik.bank.local`.
+     Scheme, host and port only. Get this wrong and the panel loads but no comment
+     can be sent, because reading is a plain `GET` while sending asks the API's
+     permission first.
    - Run as a Windows Service or in IIS (`dotnet publish`, then host).
+   - **Bind to a real interface**: `ASPNETCORE_URLS=https://0.0.0.0:5443`. The
+     default is loopback only, which answers perfectly on the server and is
+     invisible to every workstation — and the extension runs in each user's own
+     browser, not on the server. Open the port in the firewall for **user
+     workstations**, not just for the Qlik nodes.
+   - Check from a **user's PC**, not from the server:
+     `curl.exe https://bi-collab.bank.local:5443/api/diagnostics`
 2. **Extension**
-   - Zip the `extension/qlik-collaboration/` folder.
-   - QMC → Extensions → Import.
+   - Build the package with `.\deploy\package-extension.ps1` → `dist\qlik-collaboration.zip`.
+     **Do not just zip the folder.** Compress-Archive on the directory puts the files
+     one level down inside `qlik-collaboration/`, Qlik then cannot find the `.qext`,
+     and the import appears to succeed while registering nothing. The script places
+     the four files at the archive root and verifies them first.
+   - QMC → Extensions → Import. Qlik distributes it to every node itself — never
+     copy files to nodes by hand.
    - In each app: edit sheet → Custom objects → Qlik Collaboration → set
-     **Backend API URL** to the backend server (e.g. `http://bi-collab:5000`).
+     **Backend API URL** to the backend server, e.g. `https://bi-collab.bank.local:5443`.
+   - Set **User identity** to `qlik` for the rollout (see the table below).
 3. **QMC → Content Security Policy** (the #1 gotcha — without this, Enterprise
    silently blocks the extension's network calls):
    - Add an entry for the backend origin with directives:
-     `connect-src http://bi-collab:5000 ws://bi-collab:5000`
+     `connect-src https://bi-collab.bank.local:5443 wss://bi-collab.bank.local:5443`
+   - `connect-src` covers both the REST calls and the SignalR WebSocket; the
+     `wss://` form is what live updates need. Without it the panel still works, but
+     only on its polling fallback.
+   - The panel names this failure by itself from v0.13.3: the browser reports a
+     policy violation, and the toast says the Content Security Policy blocked the
+     call and which directive to add, rather than blaming the network.
 4. **Identity — automatic.** The extension calls
    `app.global.getAuthenticatedUser()`; on Enterprise this returns the real
    AD identity (`UserDirectory=BANK; UserId=ivanov`). The name input is replaced
