@@ -48,6 +48,18 @@ var app = builder.Build();
 app.Logger.LogInformation("CORS: {Policy}",
     allowAnyOrigin ? "any origin (development)" : string.Join(", ", allowedOrigins));
 
+// The database has to have the columns this build uses before anything reads them.
+// Upgrading the app does not upgrade the database: schema.sql is applied by hand, and
+// the Postgres container's init directory only runs on an empty volume. Without this
+// check a missing column surfaced as an Npgsql stack trace in a restart loop.
+if (!await SchemaGuard.EnsureAsync(
+        app.Services.GetRequiredService<NpgsqlDataSource>(),
+        builder.Configuration.GetValue("Database:ApplySchemaOnStart", false),
+        app.Logger))
+{
+    return 1;      // the message above says what to run; a stack trace would not
+}
+
 // Roles are managed from the team inbox and only seeded from configuration, so this
 // runs once at startup to apply Team:Admins / Team:Members and to say plainly when
 // nobody can administer anything yet.
@@ -109,3 +121,4 @@ app.MapGet("/health", async (NpgsqlDataSource db, ILogger<Program> log) =>
 });
 
 app.Run();
+return 0;

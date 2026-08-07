@@ -212,6 +212,7 @@ Windows Service inject secrets without writing them to a file.
 | `Cors:AllowedOrigins:0` | `Cors__AllowedOrigins__0` | allowed browser origin; `*` = any (dev only) |
 | `Qlik:BaseUrl` | `Qlik__BaseUrl` | Qlik hub the inbox's "open the sheet" links point at, e.g. `https://qlik.bank.local`. Different on every server — set it per deployment |
 | `Qlik:BaseUrl` | `Qlik__BaseUrl` / `QLIK_BASE_URL` | **Set this.** Where the inbox's "open the sheet" links point, e.g. `https://qlik.bank.local`. Different from `Cors:AllowedOrigins`, which decides who may *call* the API. Empty = links are omitted rather than pointing at the wrong machine |
+| `Database:ApplySchemaOnStart` | `Database__ApplySchemaOnStart` / `DB_APPLY_SCHEMA` | `true` = apply `schema.sql` at startup after an upgrade. `false` (default) = refuse to start and print what is missing, for sites where a DBA owns the schema |
 | `Team:Admins:0` | `Team__Admins__0` | **Set at least one.** Seeds the first admin, who can then grant roles from the team inbox. Without one, the roles screen is read-only and the API warns at startup |
 | `Team:Members:0` | `Team__Members__0` | Seeds the BI team, who see every thread and receive notifications. Everyone else is a guest and sees only the threads they started |
 | `Email:Enabled` | `Email__Enabled` | turn the digest on (default `false`) |
@@ -222,6 +223,30 @@ Windows Service inject secrets without writing them to a file.
 | `Email:IntervalMinutes` | `Email__IntervalMinutes` | how often to check (default 30, minimum 5) |
 | `Email:ReminderHours` | `Email__ReminderHours` | with nothing new, re-send the unanswered list at most this often (default 24) |
 | `Email:InboxUrl` | `Email__InboxUrl` | the team inbox address the e-mail links to |
+
+### Upgrading an existing installation
+
+**Upgrading the API does not upgrade the database.** `schema.sql` is applied by hand
+(Options A and B), and the Postgres container runs it only on a brand-new empty volume
+(Option C). A release that adds a column therefore meets a database without it.
+
+Since this is checked at startup, the symptom is now a message rather than a crash
+loop:
+
+```
+crit: This build needs database changes that are not there yet: users.role (roles) …
+      psql -U postgres -d qlik_collaboration -f database/schema.sql
+```
+
+Either run that once — it is idempotent, safe on a live database, and keeps every
+existing comment — or set `DB_APPLY_SCHEMA=true` in `.env` and let the API apply it
+itself. The schema is embedded in the build, so the two can never be a checkout apart.
+
+> `Cannot load library libgssapi_krb5.so.2` in the container log is **harmless**.
+> Npgsql looks for Kerberos in case the connection needs integrated authentication;
+> this one uses a password, so it carries on. Installing the library would need a
+> package download, which a server without internet access cannot do — and it would
+> change nothing.
 
 ### Roles
 

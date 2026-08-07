@@ -43,6 +43,7 @@ services:
       # Leave unset to allow any origin (development only).
       Cors__AllowedOrigins__0: ${QLIK_ORIGIN:-*}
       Qlik__BaseUrl: ${QLIK_BASE_URL:-}
+      Database__ApplySchemaOnStart: ${DB_APPLY_SCHEMA:-false}
       Swagger__Enabled: "${SWAGGER_ENABLED:-true}"
       ASPNETCORE_ENVIRONMENT: Production
     ports:

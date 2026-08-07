@@ -13,4 +13,11 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
 
+
+  <ItemGroup>
+    <!-- The running build carries the schema it expects, so the two cannot be a
+         checkout apart, and Database:ApplySchemaOnStart needs no file on disk. -->
+    <EmbeddedResource Include="..\..\database\schema.sql" LogicalName="schema.sql" />
+  </ItemGroup>
+
 </Project>

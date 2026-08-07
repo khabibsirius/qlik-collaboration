@@ -1,0 +1,108 @@
+using System.Reflection;
+using Dapper;
+using Npgsql;
+
+namespace QlikCollaboration.Api.Services;
+
+/// <summary>
+/// Makes the app and the database disagree loudly and usefully, instead of quietly.
+///
+/// database/schema.sql is applied by hand (Option A/B) or by the Postgres container's
+/// init directory, which only runs on an EMPTY volume (Option C). Neither re-runs when
+/// the app is upgraded, so a release that adds a column starts against a database that
+/// does not have it. What that looked like was a crash loop printing an Npgsql stack
+/// trace every second — accurate about what failed, silent about what to do.
+///
+/// The schema is embedded in the assembly rather than read from disk: the running code
+/// and the schema it expects then travel together, and cannot be a checkout apart.
+/// </summary>
+public static class SchemaGuard
+{
+    /// <summary>
+    /// Columns and tables added after the first release. Each entry is something the
+    /// code now depends on; a database missing any of them will fail at runtime.
+    /// </summary>
+    private static readonly (string Table, string? Column, string AddedIn)[] Required =
+    [
+        ("users",       "role",       "roles"),
+        ("comments",    "app_name",   "dashboard titles in the inbox"),
+        ("comments",    "sheet_name", "dashboard titles in the inbox"),
+        ("digest_runs", null,         "the e-mail digest")
+    ];
+
+    public static async Task<List<string>> MissingAsync(NpgsqlConnection conn)
+    {
+        var missing = new List<string>();
+        foreach (var (table, column, feature) in Required)
+        {
+            bool present = column is null
+                ? await conn.ExecuteScalarAsync<bool>(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = @table)",
+                    new { table })
+                : await conn.ExecuteScalarAsync<bool>(
+                    @"SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                                     WHERE table_name = @table AND column_name = @column)",
+                    new { table, column });
+
+            if (!present)
+                missing.Add(column is null ? $"table {table} ({feature})"
+                                           : $"{table}.{column} ({feature})");
+        }
+        return missing;
+    }
+
+    /// <summary>The schema.sql this build was compiled with.</summary>
+    public static string EmbeddedSchema()
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        var name = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith("schema.sql", StringComparison.OrdinalIgnoreCase))
+                   ?? throw new InvalidOperationException("schema.sql is not embedded in this build.");
+        using var stream = asm.GetManifestResourceStream(name)!;
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// Applies the embedded schema. Every statement in it is idempotent — CREATE TABLE
+    /// IF NOT EXISTS, ADD COLUMN IF NOT EXISTS, guarded DO blocks — so running it
+    /// against an up-to-date database changes nothing.
+    /// </summary>
+    public static async Task ApplyAsync(NpgsqlConnection conn) =>
+        await conn.ExecuteAsync(EmbeddedSchema());
+
+    /// <summary>
+    /// Returns true when the database is usable. Logs what to do when it is not.
+    /// </summary>
+    public static async Task<bool> EnsureAsync(NpgsqlDataSource db, bool autoApply, ILogger log)
+    {
+        await using var conn = await db.OpenConnectionAsync();
+        var missing = await MissingAsync(conn);
+        if (missing.Count == 0) return true;
+
+        if (autoApply)
+        {
+            log.LogWarning("Database is behind this build ({Missing}) — applying the schema.",
+                           string.Join("; ", missing));
+            await ApplyAsync(conn);
+
+            var still = await MissingAsync(conn);
+            if (still.Count == 0)
+            {
+                log.LogInformation("Schema applied; database is up to date.");
+                return true;
+            }
+            log.LogCritical("Applying the schema did not add: {Missing}", string.Join("; ", still));
+            return false;
+        }
+
+        log.LogCritical(
+            "This build needs database changes that are not there yet: {Missing}.\n" +
+            "Apply them once — the file is idempotent, so it is safe on a live database " +
+            "and keeps every existing comment:\n" +
+            "    psql -U postgres -d qlik_collaboration -f database/schema.sql\n" +
+            "Or set Database:ApplySchemaOnStart=true (env: Database__ApplySchemaOnStart=true) " +
+            "to let the API apply it itself at startup.",
+            string.Join("; ", missing));
+        return false;
+    }
+}
