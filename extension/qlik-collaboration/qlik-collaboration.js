@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.13.0";
+  var EXT_VERSION = "0.13.1";
 
   function esc(text) {
     return String(text)
@@ -1148,7 +1148,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // different problem from a server that answered and said no, so name it.
       function describeFetchError(err) {
         if (err instanceof TypeError) return "no response — backend down, wrong URL, or blocked by the Qlik CSP";
-        return (err && err.message) ? "server answered " + err.message : "unknown error";
+        // The message is now the server's own explanation where there is one, so pass
+        // it through instead of wrapping a status code around it.
+        return (err && err.message) ? err.message : "unknown error";
       }
 
       function refresh() {
@@ -1254,8 +1256,14 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             selectionState: withSel ? JSON.stringify(usableSel) : null
           })
         }).then(function (r) {
-          if (!r.ok) throw new Error(r.status);
-          return r.json();
+          if (r.ok) return r.json();
+          // The server explains itself now. Read the explanation rather than
+          // reporting the status code and making someone go and find the log.
+          return r.json().then(function (body) {
+            throw new Error((body && body.error) ? body.error : "server answered " + r.status);
+          }, function () {
+            throw new Error("server answered " + r.status);
+          });
         }).then(function (created) {
           return uploadPending(created.id);
         }).then(function () {

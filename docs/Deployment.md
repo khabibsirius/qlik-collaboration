@@ -224,6 +224,22 @@ Windows Service inject secrets without writing them to a file.
 | `Email:ReminderHours` | `Email__ReminderHours` | with nothing new, re-send the unanswered list at most this often (default 24) |
 | `Email:InboxUrl` | `Email__InboxUrl` | the team inbox address the e-mail links to |
 
+### When something is wrong
+
+```
+http://<server>:5000/api/diagnostics
+```
+
+One page, safe to read — no comment text, no credentials. It answers the questions
+every problem so far has started with: what build is actually running and how old it
+is, whether the database is reachable and up to date, which columns or indexes are
+missing, whether any two usernames differ only in capitalisation, and what CORS,
+`Qlik:BaseUrl` and the seeded admins are set to.
+
+A failed request also carries its reason now: the panel shows the database's own
+message instead of "server answered 500", so the log is no longer the only place the
+cause exists.
+
 ### Upgrading an existing installation
 
 **Upgrading the API does not upgrade the database.** `schema.sql` is applied by hand

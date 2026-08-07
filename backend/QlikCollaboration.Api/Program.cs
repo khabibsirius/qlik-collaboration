@@ -73,6 +73,38 @@ if (builder.Configuration.GetValue("Swagger:Enabled", true))
     app.UseSwaggerUI();
 }
 
+// An unhandled exception was reaching the client as a bare 500 with the reason only
+// in the container log — so "it shows an error" was all anyone could report, and
+// every diagnosis started by asking for the log. The reason now travels with the
+// response, and the panel shows it.
+app.UseExceptionHandler(branch => branch.Run(async context =>
+{
+    var error = context.Features
+        .Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+
+    var log = context.RequestServices.GetRequiredService<ILogger<Program>>();
+    log.LogError(error, "Unhandled error on {Method} {Path}", context.Request.Method, context.Request.Path);
+
+    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    context.Response.ContentType = "application/json";
+
+    // A Postgres error carries the useful part in its own message; anything else
+    // falls back to the exception type and text.
+    var reason = error switch
+    {
+        Npgsql.PostgresException pg => $"database: {pg.MessageText}" +
+                                       (pg.Hint is null ? "" : $" ({pg.Hint})"),
+        null => "unknown error",
+        _ => error.Message
+    };
+
+    await context.Response.WriteAsJsonAsync(new
+    {
+        error = reason,
+        traceId = context.TraceIdentifier
+    });
+}));
+
 app.UseCors();
 
 // The team inbox is a static page served by this same app: no extra host, no extra
