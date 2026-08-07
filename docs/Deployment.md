@@ -224,6 +224,29 @@ Windows Service inject secrets without writing them to a file.
 | `Email:ReminderHours` | `Email__ReminderHours` | with nothing new, re-send the unanswered list at most this often (default 24) |
 | `Email:InboxUrl` | `Email__InboxUrl` | the team inbox address the e-mail links to |
 
+### Making an existing database good
+
+Two files, in this order. The first fixes the shape, the second fixes the data that
+stops the shape from applying.
+
+```powershell
+psql -U postgres -d qlik_collaboration -f database/schema.sql
+psql -U postgres -d qlik_collaboration -f database/repair.sql
+```
+
+`repair.sql` runs in one transaction and prints every change:
+
+- **merges users whose names differ only in capitalisation.** The row that has
+  written the most comments is kept — the spelling the team actually uses — and the
+  other's comments, notifications and the stronger of the two roles move onto it
+  before it is removed. Nothing is deleted without its history being moved first.
+- **registers authors who were never in the users table**, which is possible on
+  older databases where a name was typed before the panel announced users. They are
+  what makes the inbox's people filter miss someone.
+- **builds the unique index** that could not exist while the duplicates did.
+
+It ends with a short report, and it is safe to run twice.
+
 ### When something is wrong
 
 ```
