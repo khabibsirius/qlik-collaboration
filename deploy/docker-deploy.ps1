@@ -19,7 +19,10 @@
 param(
     [switch] $Preflight,
     [switch] $Down,
-    [switch] $Logs
+    [switch] $Logs,
+    # Build the app inside Docker instead of publishing locally first.
+    # Needs no .NET SDK on this machine, but pulls a large SDK base image.
+    [switch] $MultiStage
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,7 +52,8 @@ Write-Host "Compose file       : $composeFile" -ForegroundColor Cyan
 
 # ---------------------------------------------------------------- preflight ---
 if ($Preflight) {
-    $problems = @()
+    $problems = @()   # must be fixed before deploying
+    $notes    = @()   # conditional - may or may not apply to this engine
 
     if (-not (Test-Path $envFile)) {
         $problems += ".env is missing. Copy .env.example to .env and set DB_PASSWORD."
@@ -101,20 +105,28 @@ if ($Preflight) {
         # refused even when the port is open.
         $hba = Join-Path $conf.DirectoryName "pg_hba.conf"
         if (Test-Path $hba) {
-            $open = Select-String -Path $hba -Pattern "^\s*host\s+.*\s(0\.0\.0\.0/0|172\.|10\.)" |
+            $open = Select-String -Path $hba -Pattern "^\s*host(ssl)?\s+.*\s(0\.0\.0\.0/0|172\.|10\.|192\.168\.)" |
                     Select-Object -First 1
-            if (-not $open) {
-                $problems += "pg_hba.conf has no host rule covering the container network. Add e.g. 'host all all 172.16.0.0/12 scram-sha-256' (Linux containers) or the NAT subnet (Windows containers), then reload PostgreSQL."
+            if ($open) {
+                Write-Host "pg_hba.conf        : has a host rule covering a container subnet" -ForegroundColor Green
             } else {
-                Write-Host "pg_hba.conf        : has a container-reachable host rule" -ForegroundColor Green
+                # Not always fatal: Docker Desktop proxies host.docker.internal via the
+                # host loopback, so PostgreSQL sees 127.0.0.1 and the existing local
+                # rule is enough. Other engines -- notably Windows containers on the
+                # NAT network -- connect from the container subnet and get rejected.
+                $notes += "pg_hba.conf only allows loopback. That is fine under Docker Desktop (it proxies through 127.0.0.1) but Windows containers connect from the NAT subnet and will be refused. If the container cannot connect, add e.g. 'host all all 172.16.0.0/12 scram-sha-256' and reload PostgreSQL."
             }
         }
     }
 
+    if ($notes.Count -gt 0) {
+        Write-Host "`nWorth knowing:" -ForegroundColor Cyan
+        $notes | ForEach-Object { Write-Host "  - $_" -ForegroundColor Gray }
+    }
     if ($problems.Count -eq 0) {
         Write-Host "`nPreflight passed -- run .\deploy\docker-deploy.ps1 to build and start." -ForegroundColor Green
     } else {
-        Write-Host "`nPreflight found $($problems.Count) problem(s):" -ForegroundColor Yellow
+        Write-Host "`nPreflight found $($problems.Count) problem(s) to fix first:" -ForegroundColor Yellow
         $problems | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
     }
     return
@@ -132,6 +144,42 @@ if ($Down) {
 if (-not (Test-Path $envFile)) {
     throw ".env is missing. Copy .env.example to .env and set DB_PASSWORD first."
 }
+
+# --------------------------------------------------------------- build mode ---
+# Preferred: publish with the locally installed .NET SDK, then build a runtime-only
+# image. Building inside Docker instead would pull an SDK base image -- ~800 MB on
+# Linux, ~6-8 GB of Windows Server Core -- which is often impractical on a
+# corporate network. -MultiStage forces the in-Docker build when there is no SDK.
+$project    = Join-Path $root "backend\QlikCollaboration.Api"
+$publishDir = Join-Path $project "publish"
+$hasSdk     = $false
+if (-not $MultiStage) {
+    try { $hasSdk = [bool](& dotnet --version 2>$null) -and $LASTEXITCODE -eq 0 } catch { $hasSdk = $false }
+    if (-not $hasSdk) {
+        Write-Warning "No .NET SDK found -- falling back to building inside Docker."
+        Write-Warning "That pulls a large SDK base image; install the .NET 8 SDK to avoid it."
+    }
+}
+
+if ($hasSdk) {
+    Write-Host "`nPublishing with the local .NET SDK..." -ForegroundColor Cyan
+    if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force -Confirm:$false }
+    & dotnet publish $project -c Release -o $publishDir --nologo
+    if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
+
+    $env:DOCKERFILE = "Dockerfile.prebuilt"
+    $tag = Get-EnvValue 'WINDOWS_TAG' 'ltsc2022'
+    $env:RUNTIME_IMAGE = if ($osType -eq 'windows') {
+        "mcr.microsoft.com/dotnet/aspnet:8.0-nanoserver-$tag"
+    } else {
+        "mcr.microsoft.com/dotnet/aspnet:8.0"
+    }
+    Write-Host "Runtime image      : $env:RUNTIME_IMAGE" -ForegroundColor Cyan
+} else {
+    # multi-stage: build the app inside Docker
+    $env:DOCKERFILE = if ($osType -eq 'windows') { "Dockerfile.windows" } else { "Dockerfile" }
+}
+Write-Host "Dockerfile         : $env:DOCKERFILE" -ForegroundColor Cyan
 
 Write-Host "`nBuilding and starting..." -ForegroundColor Cyan
 & docker compose -f $composePath up -d --build

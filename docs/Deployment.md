@@ -267,10 +267,26 @@ Honest record of what has actually been executed:
 
 | Piece | Status |
 |---|---|
-| Published binary running with a service-style environment block (`/health`, CORS lockdown, Swagger off, custom port) | **verified** |
+| **Container built and run end-to-end**: image built from `Dockerfile.prebuilt`, container started, `/health` returned `{"status":"healthy","database":"up"}`, `/api/users` returned real rows, CORS locked to the configured origin | **verified** (Linux-container mode) |
+| Container reaching the **host** PostgreSQL over `host.docker.internal` | **verified** |
+| Published binary running with a service-style environment block | **verified** |
 | `dotnet publish` output (7.7 MB) | **verified** |
-| All compose files (`config` validation, variable and volume-path resolution incl. `C:\data\uploads`) | **verified** |
+| Both compose files, in both build modes (`config` validation, variables, volume paths incl. `C:\data\uploads`) | **verified** |
 | `deploy\*.ps1` parse + `-Preflight` logic | **verified** |
 | `package-extension.ps1` producing the QMC zip | **verified** |
-| Docker image build and container run | **not executed** — the base-image pull ran at ~67 KB/s on the development network |
+| Windows-container image (`Dockerfile.windows`, Nano Server) | **not executed** — needs a Windows-container engine; the Linux equivalent of the same prebuilt Dockerfile is verified |
 | `sc.exe` service creation, registry environment block, firewall rule | **not executed** — needs an elevated session on the target server |
+
+### Bug this verification caught
+
+Running the container for real exposed a defect that static checking had missed:
+`appsettings.json` contained a `"Urls": "http://localhost:5000"` key. App configuration
+is layered **on top of** host configuration, so that key silently overrode
+`ASPNETCORE_URLS` — the app bound to `localhost` *inside* the container and the
+published port answered nothing. It would have broken the Windows Service deployment
+in exactly the same way (`-ListenUrl` would have had no effect).
+
+Fixed by removing the key from `appsettings.json`; the listen address now comes from
+`ASPNETCORE_URLS` in production and from `Properties/launchSettings.json` (never
+published) for local development. **Do not reintroduce a `Urls` key in
+appsettings.json.**

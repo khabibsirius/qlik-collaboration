@@ -16,6 +16,12 @@ services:
   api:
     build:
       context: ./backend/QlikCollaboration.Api
+      # Dockerfile.prebuilt (default) needs `dotnet publish -o publish` first and
+      # pulls only the ~215 MB runtime image; Dockerfile builds inside Docker but
+      # also pulls a ~800 MB SDK image. deploy\docker-deploy.ps1 sets this.
+      dockerfile: ${DOCKERFILE:-Dockerfile.prebuilt}
+      args:
+        RUNTIME_IMAGE: ${RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:8.0}
     image: qlik-collaboration-api:latest
     container_name: qlikcollab-api
     restart: unless-stopped
@@ -23,6 +29,7 @@ services:
       # host.docker.internal resolves to the host machine. If it does not resolve,
       # put the server's own LAN IP in DB_HOST instead.
       ConnectionStrings__Postgres: "Host=${DB_HOST:-host.docker.internal};Port=${DB_PORT:-5432};Database=${DB_NAME:-qlik_collaboration};Username=${DB_USER:-postgres};Password=${DB_PASSWORD:?DB_PASSWORD must be set in .env}"
+      Storage__AttachmentsPath: /data/uploads
       Cors__AllowedOrigins__0: ${QLIK_ORIGIN:-*}
       Notifications__BroadcastWhenNoMention: "${BROADCAST_WHEN_NO_MENTION:-true}"
       Swagger__Enabled: "${SWAGGER_ENABLED:-false}"

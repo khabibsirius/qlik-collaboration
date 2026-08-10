@@ -1,0 +1,25 @@
+# Runtime-only image: expects `dotnet publish -o publish` to have been run already.
+#
+# This is the DEFAULT path used by deploy\docker-deploy.ps1, because it avoids
+# downloading a .NET SDK base image on the server:
+#     multi-stage build   Linux ~800 MB SDK  |  Windows ~6-8 GB Server Core SDK
+#     prebuilt (this file) Linux ~215 MB     |  Windows ~300 MB Nano Server
+# On a throttled corporate network that difference decides whether it deploys at all.
+#
+# RUNTIME_IMAGE must match the Docker engine mode, and for Windows the ltsc tag
+# must match the host OS:
+#   Linux    mcr.microsoft.com/dotnet/aspnet:8.0
+#   Windows  mcr.microsoft.com/dotnet/aspnet:8.0-nanoserver-ltsc2022
+
+ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:8.0
+FROM ${RUNTIME_IMAGE}
+
+WORKDIR /app
+COPY publish/ ./
+
+# Listen address; the attachments path is set per-mode by the compose file
+# (/data/uploads on Linux, C:\data\uploads on Windows).
+ENV ASPNETCORE_URLS=http://+:5000
+
+EXPOSE 5000
+ENTRYPOINT ["dotnet", "QlikCollaboration.Api.dll"]

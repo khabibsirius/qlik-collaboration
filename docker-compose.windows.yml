@@ -1,23 +1,29 @@
 # API in a WINDOWS container, connecting to the PostgreSQL already installed on
 # the server. Use this when `docker info --format "{{.OSType}}"` says "windows".
 #
-#   copy .env.example to .env, set DB_PASSWORD and WINDOWS_TAG, then:
-#     docker compose -f docker-compose.windows.yml up -d --build
+# Normally you do not run this by hand -- deploy\docker-deploy.ps1 picks the file,
+# publishes the app and sets DOCKERFILE/RUNTIME_IMAGE for you:
+#     .\deploy\docker-deploy.ps1 -Preflight
+#     .\deploy\docker-deploy.ps1
 #
 # WINDOWS_TAG must match the host OS or the container will not start:
 #   Windows Server 2019 -> ltsc2019 | 2022 -> ltsc2022 | 2025 -> ltsc2025
 # Check with:  (Get-ComputerInfo).OsName
 #
-# The container must be allowed to reach the host database — see
-# docs/Deployment.md, "Letting the container reach the host PostgreSQL".
+# The container must be allowed to reach the host database -- see
+# docs/Deployment.md, "Let the container reach the host PostgreSQL".
 
 services:
   api:
     build:
       context: ./backend/QlikCollaboration.Api
-      dockerfile: Dockerfile.windows
+      # Dockerfile.prebuilt (default) needs `dotnet publish -o publish` first and
+      # pulls only the ~300 MB runtime image. Dockerfile.windows builds inside
+      # Docker instead, but pulls a ~6-8 GB Server Core SDK image.
+      dockerfile: ${DOCKERFILE:-Dockerfile.prebuilt}
       args:
         WINDOWS_TAG: ${WINDOWS_TAG:-ltsc2022}
+        RUNTIME_IMAGE: ${RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:8.0-nanoserver-ltsc2022}
     image: qlik-collaboration-api:windows
     container_name: qlikcollab-api
     restart: unless-stopped
@@ -26,6 +32,7 @@ services:
       # Windows containers outside Docker Desktop), set DB_HOST to the server's
       # own LAN IP address in .env.
       ConnectionStrings__Postgres: "Host=${DB_HOST:-host.docker.internal};Port=${DB_PORT:-5432};Database=${DB_NAME:-qlik_collaboration};Username=${DB_USER:-postgres};Password=${DB_PASSWORD:?DB_PASSWORD must be set in .env}"
+      Storage__AttachmentsPath: C:\data\uploads
       Cors__AllowedOrigins__0: ${QLIK_ORIGIN:-*}
       Notifications__BroadcastWhenNoMention: "${BROADCAST_WHEN_NO_MENTION:-true}"
       Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
@@ -33,7 +40,6 @@ services:
     ports:
       - "${API_PORT:-5000}:5000"
     volumes:
-      # Windows container path — matches Storage__AttachmentsPath in Dockerfile.windows
       - uploads:C:\data\uploads
 
 volumes:
