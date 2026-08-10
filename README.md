@@ -4,11 +4,27 @@
 
 ```
 qlik-collaboration/
-├── backend/     ASP.NET Core 8 REST API  (QlikCollaboration.Api)
-├── extension/   Qlik Sense extension     (qlik-collaboration)
-├── database/    PostgreSQL schema        (schema.sql)
-└── docs/        Architecture, API, Install
+├── backend/     ASP.NET Core 8 REST API + SignalR  (QlikCollaboration.Api)
+├── extension/   Qlik Sense extension               (qlik-collaboration)
+├── database/    PostgreSQL schema                  (schema.sql)
+├── deploy/      Windows Service installer, extension packaging
+└── docs/        Architecture, API, Install, Deployment, Enterprise
 ```
+
+## Deploy
+
+```bash
+cp .env.example .env          # set POSTGRES_PASSWORD and QLIK_ORIGIN
+docker compose up -d --build  # API on :5000, PostgreSQL with the schema applied
+```
+
+No Docker on the target Windows Server? Use the service installer instead:
+
+```powershell
+.\deploy\install-windows-service.ps1 -DbHost pg.bank.local -DbPassword '<pwd>' -QlikOrigin https://qlik.bank.local
+```
+
+Both paths, plus HTTPS, backups and sizing: [docs/Deployment.md](docs/Deployment.md).
 
 ## Quick start (Qlik Sense Desktop)
 

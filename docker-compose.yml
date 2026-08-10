@@ -1,0 +1,55 @@
+# Qlik Collaboration — full stack.
+#   copy .env.example to .env, set the password, then:  docker compose up -d
+#
+# Data lives in named volumes, NOT in the containers: `docker compose down`
+# keeps comments and attachments, only `down -v` destroys them.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: qlikcollab-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: qlik_collaboration
+      POSTGRES_USER: ${POSTGRES_USER:-qlik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # runs once, on an empty data directory, to create the tables
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-qlik} -d qlik_collaboration"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    # Not published to the host by default — only the API needs to reach it.
+    # Uncomment to inspect the database from outside:
+    # ports:
+    #   - "5433:5432"
+
+  api:
+    build:
+      context: ./backend/QlikCollaboration.Api
+    image: qlik-collaboration-api:latest
+    container_name: qlikcollab-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Postgres: "Host=db;Port=5432;Database=qlik_collaboration;Username=${POSTGRES_USER:-qlik};Password=${POSTGRES_PASSWORD}"
+      # Comma-separated list is not supported — one indexed variable per origin.
+      # Leave unset to allow any origin (development only).
+      Cors__AllowedOrigins__0: ${QLIK_ORIGIN:-*}
+      Notifications__BroadcastWhenNoMention: "${BROADCAST_WHEN_NO_MENTION:-true}"
+      Swagger__Enabled: "${SWAGGER_ENABLED:-true}"
+      ASPNETCORE_ENVIRONMENT: Production
+    ports:
+      - "${API_PORT:-5000}:5000"
+    volumes:
+      - uploads:/data/uploads
+
+volumes:
+  pgdata:
+  uploads:
