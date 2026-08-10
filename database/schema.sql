@@ -8,10 +8,14 @@
 -- self-identify with a display name. When moving to Enterprise this
 -- table maps to the Qlik Proxy / AD identity (username = DOMAIN\user).
 CREATE TABLE IF NOT EXISTS users (
-    id           SERIAL PRIMARY KEY,
-    username     TEXT NOT NULL UNIQUE,
-    display_name TEXT NOT NULL,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    id             SERIAL PRIMARY KEY,
+    username       TEXT NOT NULL UNIQUE,
+    display_name   TEXT NOT NULL,
+    -- Qlik UserDirectory the identity came from ('BANK' on Enterprise/AD,
+    -- 'Personal' on Desktop, NULL for manually typed dev names). Audit trail:
+    -- shows which comments came from a real authenticated identity.
+    user_directory TEXT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Comments. One table handles all binding levels:

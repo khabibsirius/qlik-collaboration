@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -21,18 +22,28 @@ public class CommentsController : ControllerBase
 
     private readonly NpgsqlDataSource _db;
     private readonly IHubContext<CommentsHub> _hub;
+    private readonly bool _broadcastWhenNoMention;
 
-    public CommentsController(NpgsqlDataSource db, IHubContext<CommentsHub> hub)
+    public CommentsController(NpgsqlDataSource db, IHubContext<CommentsHub> hub, IConfiguration config)
     {
         _db = db;
         _hub = hub;
+        // When a comment mentions nobody, notify the whole team (default on).
+        // Set Notifications:BroadcastWhenNoMention=false to keep notifications
+        // limited to @mentions and replies.
+        _broadcastWhenNoMention =
+            config.GetValue<bool?>("Notifications:BroadcastWhenNoMention") ?? true;
     }
 
     private Task Broadcast(string appId, string sheetId) =>
         _hub.Clients.All.SendAsync("commentsChanged", new { appId, sheetId });
 
-    private Task NotifyUser(string username) =>
-        _hub.Clients.All.SendAsync("notify", new { username });
+    /// <summary>One message listing everyone notified — a broadcast to the whole
+    /// team would otherwise mean N messages to N clients.</summary>
+    private Task NotifyUsers(IReadOnlyCollection<string> usernames) =>
+        usernames.Count == 0
+            ? Task.CompletedTask
+            : _hub.Clients.All.SendAsync("notify", new { usernames });
 
     private static async Task AttachFiles(NpgsqlConnection conn, List<Comment> comments)
     {
@@ -67,7 +78,9 @@ public class CommentsController : ControllerBase
 
     public record CreateCommentDto(
         string AppId, string SheetId, string[]? ObjectIds, int? ParentId,
-        string Author, string Body, string? SelectionState);
+        string Author, string Body, string? SelectionState,
+        /// <summary>Qlik UserDirectory of the author ('BANK' on Enterprise) — audit only.</summary>
+        string? AuthorDirectory = null);
 
     [HttpPost]
     public async Task<ActionResult<Comment>> Create(CreateCommentDto dto)
@@ -80,11 +93,16 @@ public class CommentsController : ControllerBase
         await using var conn = await _db.OpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
 
-        // Etap 2: users self-register by commenting (Desktop has no auth;
-        // on Enterprise this becomes the authenticated identity).
+        // Etap 2: users self-register by commenting. On Enterprise the extension
+        // sends the Qlik-authenticated identity (AD via Qlik Proxy); on Desktop
+        // it is a typed name. The directory is recorded for audit and refreshed
+        // if a user who first appeared manually later arrives authenticated.
         await conn.ExecuteAsync(
-            @"INSERT INTO users (username, display_name) VALUES (@author, @author)
-              ON CONFLICT (username) DO NOTHING", new { author }, tx);
+            @"INSERT INTO users (username, display_name, user_directory)
+              VALUES (@author, @author, @directory)
+              ON CONFLICT (username) DO UPDATE
+                SET user_directory = COALESCE(EXCLUDED.user_directory, users.user_directory)",
+            new { author, directory = string.IsNullOrWhiteSpace(dto.AuthorDirectory) ? null : dto.AuthorDirectory.Trim() }, tx);
 
         var id = await conn.ExecuteScalarAsync<int>(
             @"INSERT INTO comments (app_id, sheet_id, parent_id, author, body, selection_state)
@@ -97,12 +115,17 @@ public class CommentsController : ControllerBase
                 "INSERT INTO comment_objects (comment_id, object_id) VALUES (@id, @objectId)",
                 objectIds.Select(o => new { id, objectId = o }), tx);
 
-        // Etap 2: @mentions — match "@username" against known users (longest first,
-        // so "@Ivan Petrov" wins over "@Ivan" when both exist).
+        // Etap 2: @mentions — match "@username" against known users. Anchored on
+        // both sides: a plain Contains would let user "an" match "@anna" and let
+        // an e-mail address ("send to x@ivanov.com") count as a mention — which
+        // would also silently cancel the team broadcast below.
         var usernames = (await conn.QueryAsync<string>("SELECT username FROM users", transaction: tx)).ToList();
         var mentioned = usernames
             .Where(u => !u.Equals(author, StringComparison.OrdinalIgnoreCase))
-            .Where(u => dto.Body.Contains("@" + u, StringComparison.OrdinalIgnoreCase))
+            .Where(u => Regex.IsMatch(dto.Body,
+                                      @"(?<![\w@])@" + Regex.Escape(u) + @"(?![\w])",
+                                      RegexOptions.IgnoreCase,
+                                      TimeSpan.FromMilliseconds(200)))
             .Distinct()
             .ToList();
 
@@ -132,10 +155,27 @@ public class CommentsController : ControllerBase
             }
         }
 
+        // No @mention → the comment is addressed to the whole team, so notify
+        // everyone else. Without this, a comment nobody was tagged in would reach
+        // nobody: people would have to open the sheet to discover it.
+        if (mentioned.Count == 0 && _broadcastWhenNoMention)
+        {
+            foreach (var u in usernames)
+            {
+                if (u.Equals(author, StringComparison.OrdinalIgnoreCase)) continue;
+                // Add() returns false when already notified — also collapses
+                // case-variant duplicates ("ivanov" / "Ivanov") into one notification
+                if (!toNotify.Add(u)) continue;
+                await conn.ExecuteAsync(
+                    "INSERT INTO notifications (username, comment_id, kind) VALUES (@u, @id, 'broadcast')",
+                    new { id, u }, tx);
+            }
+        }
+
         await tx.CommitAsync();
 
         await Broadcast(dto.AppId, dto.SheetId);
-        foreach (var u in toNotify) await NotifyUser(u);
+        await NotifyUsers(toNotify.ToList());
 
         var created = await GetById(conn, id);
         return CreatedAtAction(nameof(Get), new { appId = created!.AppId, sheetId = created.SheetId }, created);

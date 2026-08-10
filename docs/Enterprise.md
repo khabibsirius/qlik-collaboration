@@ -103,9 +103,23 @@ recommendation; the central node is the acceptable shortcut for a pilot.
      `connect-src http://bi-collab:5000 ws://bi-collab:5000`
 4. **Identity — automatic.** The extension calls
    `app.global.getAuthenticatedUser()`; on Enterprise this returns the real
-   AD identity (`UserDirectory=BANK; UserId=ivanov`) and the name field is
-   auto-filled and locked. Users never type their name. (On Desktop the
-   directory is `Personal`, so the field stays editable — dev mode.)
+   AD identity (`UserDirectory=BANK; UserId=ivanov`). The name input is replaced
+   by a read-only identity row (avatar + name + 🔒) — users never type a name and
+   cannot post as someone else. The directory is stored in `users.user_directory`
+   as an audit trail of which identities are genuinely authenticated.
+
+   The **User identity** setting in the object's properties controls this:
+
+   | Mode | Behaviour |
+   |---|---|
+   | `auto` (default) | Qlik identity when it is a real one; manual entry on Desktop (`UserDirectory=Personal`) |
+   | `qlik` | Always the Qlik identity, never a typed name. If Qlik cannot be asked, commenting is blocked with an error rather than falling back. **Set this for the rollout.** |
+   | `manual` | Typed name — development only |
+
+   Honest limit for the pilot: the identity is chosen by the client, and the API
+   trusts what it is sent. A user who bypasses the panel and calls the API directly
+   could still claim another name. Closing that requires server-side validation
+   (JWT / Qlik session check) — see the hardening table below.
 
 ## How the team experiences it
 
@@ -114,10 +128,36 @@ recommendation; the central node is the acceptable shortcut for a pilot.
   automatically as people participate), attach files/voice, set statuses.
 - A mention/reply lights up the 🔔 with an unread badge the next time the
   mentioned person has the panel open — instantly if they're online (SignalR).
+- A comment with **no** @mention notifies the whole team (`broadcast`), so news
+  about a dashboard is not missed by people who did not happen to open the sheet.
+- **Clicking a notification opens the comment**: on the same sheet it scrolls to
+  it and flashes it green; on another sheet Qlik navigates there and the panel
+  highlights the comment on arrival. Opening a notification marks it read.
 - "📎 apply filters" reproduces the exact selections the author had — the
   core analytical-context feature.
 
 ## Production hardening checklist (before wide rollout)
+
+### Known limitations to close before a bank-wide rollout
+
+Found by an adversarial review of the code; each is a deliberate pilot-scope decision,
+not an unknown:
+
+1. **Notifications ignore Qlik's access rules.** A comment with no `@mention`
+   notifies every user in the `users` table, and the notification carries an 80-character
+   excerpt of the comment plus its app id — even to people who have no access to that
+   app or stream in Qlik. For a pilot inside one team this is fine; before opening the
+   module to several departments, the broadcast list must be filtered by who can
+   actually open the app (QRS API check, or scope the broadcast to users who have
+   already participated in that app).
+2. **The API trusts `?user=` and the posted author name.** Anyone who can reach the
+   API can read or clear another user's notifications, or post under another name.
+   Only the panel UI is locked down. Closing this is the JWT item below.
+3. **Identity is keyed on the bare Qlik `UserId`.** Two Qlik user directories that
+   contain the same UserId would collapse into one account. Fine for one AD domain;
+   revisit if the bank has several.
+4. **The panel needs the sheet view.** `getCurrentSheetId()` fails in embedded /
+   single-object contexts, where the panel falls back to one shared thread.
 
 | Item | Now (pilot) | Production |
 |---|---|---|

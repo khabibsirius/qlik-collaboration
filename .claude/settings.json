@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:PGPASSWORD='postgres'; & \"C:\\\\Program Files\\\\PostgreSQL\\\\16\\\\bin\\\\psql.exe\" -U postgres -h localhost -d qlik_collaboration -c \"ALTER TABLE users ADD COLUMN IF NOT EXISTS user_directory TEXT NULL;\" -c \"\\\\d users\")",
+      "PowerShell(& \"C:\\\\Program Files\\\\dotnet\\\\dotnet.exe\" build \"c:\\\\project\\\\qlikchatext\\\\backend\\\\QlikCollaboration.Api\" --nologo -v q)",
+      "PowerShell(if \\($?\\) { \"JS syntax OK\" })",
+      "PowerShell(& \"C:\\\\Users\\\\Hacker\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--project-qlikchatext\\\\e0906b10-79aa-41e3-bc70-283008215b58\\\\scratchpad\\\\test-notifications.ps1\")",
+      "PowerShell(& \"C:\\\\Users\\\\Hacker\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--project-qlikchatext\\\\e0906b10-79aa-41e3-bc70-283008215b58\\\\scratchpad\\\\verify.ps1\")",
+      "PowerShell(curl.exe -s -w \"`nHTTP %{http_code}`n\" -X POST \"http://localhost:5000/api/comments\" -H \"Content-Type: application/json\" -d '{\"appId\":\"TESTAPP\",\"sheetId\":\"S1\",\"author\":\"ivanov\",\"authorDirectory\":\"BANK\",\"body\":\"hello\"}')",
+      "PowerShell(& \"c:\\\\project\\\\qlikchatext\\\\deploy-extension.ps1\")",
+      "PowerShell(Get-Process -Name \"QlikCollaboration.Api\" -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Force -Confirm:$false)",
+      "PowerShell(& \"C:\\\\Users\\\\Hacker\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--project-qlikchatext\\\\e0906b10-79aa-41e3-bc70-283008215b58\\\\scratchpad\\\\verify.ps1\" 2>&1)",
+      "PowerShell($env:PGPASSWORD='postgres'; & \"C:\\\\Program Files\\\\PostgreSQL\\\\16\\\\bin\\\\psql.exe\" -U postgres -h localhost -d qlik_collaboration -c \"DELETE FROM comments WHERE app_id='TESTAPP'; DELETE FROM users WHERE username IN \\('ivanov','petrova','sidorov'\\);\" -c \"SELECT username, user_directory FROM users ORDER BY username;\")",
+      "Read(//c/Users/Hacker/.nuget/packages/dapper/**)",
+      "Bash(grep -n 'qcol-author\\\\|$author' extension/qlik-collaboration/qlik-collaboration.js)",
+      "Bash(grep -o \"define\\(\\\\[\\\\][^;]\\\\{0,60\\\\}\" \"C:/project/qlikchatext/extension/qlik-collaboration/signalr.min.js\")",
+      "Bash(strings -a \"/c/Users/Hacker/.nuget/packages/dapper/2.1.79/lib/net8.0/Dapper.dll\" 2>/dev/null | grep -i -E \"valuetuple|ReadTuple|tuple\" | sort -u | head -40)",
+      "Read(//c/Users/Hacker/.nuget/packages/dapper/2.1.79/lib/net8.0/**)",
+      "Bash(grep -o \"VERSION[^,]\\\\{0,40\\\\}\" \"C:/project/qlikchatext/extension/qlik-collaboration/signalr.min.js\")",
+      "PowerShell($b=[IO.File]::ReadAllBytes\\(\"C:\\\\Users\\\\Hacker\\\\.nuget\\\\packages\\\\dapper\\\\2.1.79\\\\lib\\\\net8.0\\\\Dapper.dll\"\\); $ascii=[Text.Encoding]::ASCII.GetString\\($b\\); $uni=[Text.Encoding]::Unicode.GetString\\($b\\); foreach\\($p in @\\('ValueTuple','ReadTuple','GetValueTupleDeserializer','IsValueTuple'\\)\\){ \"ascii $p : \" + \\([regex]::Matches\\($ascii,$p\\).Count\\) + \"  utf16 $p : \" + \\([regex]::Matches\\($uni,$p\\).Count\\) })",
+      "PowerShell($b=[IO.File]::ReadAllBytes\\(\"C:\\\\Users\\\\Hacker\\\\.nuget\\\\packages\\\\dapper\\\\2.1.79\\\\lib\\\\net8.0\\\\Dapper.dll\"\\); $ascii=[Text.Encoding]::ASCII.GetString\\($b\\); foreach\\($m in [regex]::Matches\\($ascii,'ValueTuple'\\)\\){ $s=[Math]::Max\\(0,$m.Index-60\\); \"---\"; \\($ascii.Substring\\($s,150\\) -replace '[^\\\\x20-\\\\x7E]','.'\\) })",
+      "WebSearch",
+      "WebFetch(domain:help.qlik.com)",
+      "Bash(dotnet --version)",
+      "Bash(mkdir -p \"C:/Users/Hacker/AppData/Local/Temp/claude/c--project-qlikchatext/e0906b10-79aa-41e3-bc70-283008215b58/scratchpad/tupletest\")",
+      "Bash(dotnet new *)",
+      "WebFetch(domain:extendingqlik.upper88.com)",
+      "Bash(dotnet add *)",
+      "Bash(dotnet run *)",
+      "Bash(ls \"/c/Program Files/Google/Chrome/Application/chrome.exe\" \"/c/Program Files \\(x86\\)/Google/Chrome/Application/chrome.exe\" \"/c/Program Files \\(x86\\)/Microsoft/Edge/Application/msedge.exe\" \"/c/Program Files/Microsoft/Edge/Application/msedge.exe\" 2>/dev/null; echo \"---\"; which node 2>/dev/null)",
+      "Read(//c/Program Files/Google/Chrome/Application/**)"
+    ]
+  }
+}

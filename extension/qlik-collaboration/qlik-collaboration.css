@@ -5,6 +5,7 @@
    ============================================================ */
 
 .qcol-panel {
+  position: relative;   /* anchors the toast */
   --qcol-green: #009845;
   --qcol-green-dark: #007d39;
   --qcol-ink: #1f2937;
@@ -91,15 +92,84 @@
   letter-spacing: 0;
 }
 .qcol-notifs-head a:hover { text-decoration: underline; }
-.qcol-notif { padding: 7px 14px; color: var(--qcol-muted); font-size: 12px; }
+.qcol-notif {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 7px 14px;
+  color: var(--qcol-muted);
+  font-size: 12px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background .12s, border-color .12s;
+}
+.qcol-notif:hover { background: #f4f6f8; border-left-color: var(--qcol-green); }
 .qcol-notif-unread { background: #f0faf4; color: var(--qcol-ink); }
+.qcol-notif-unread:hover { background: #e6f6ec; }
 .qcol-notif-kind {
-  display: inline-block;
+  flex: none;
   width: 15px;
   color: var(--qcol-green);
   font-weight: 700;
+  text-align: center;
 }
-.qcol-notif-time { float: right; color: var(--qcol-faint); font-size: 10px; margin-top: 1px; }
+.qcol-notif-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qcol-notif-time { flex: none; color: var(--qcol-faint); font-size: 10px; }
+.qcol-notif-away { flex: none; color: var(--qcol-green); font-size: 11px; }
+
+/* ---------- signed-in identity (Enterprise) ---------- */
+
+.qcol-identity {
+  align-items: center;
+  gap: 8px;
+  background: #f4f6f8;
+  border: 1px solid var(--qcol-line);
+  border-radius: 7px;
+  padding: 5px 9px;
+  margin-bottom: 6px;
+}
+.qcol-identity-avatar {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 22px;
+}
+.qcol-identity-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qcol-identity-lock { flex: none; font-size: 10px; opacity: .5; }
+
+.qcol-identity-wait {
+  background: #f4f6f8;
+  border: 1px solid var(--qcol-line);
+  border-radius: 7px;
+  padding: 5px 9px;
+  margin-bottom: 6px;
+  color: var(--qcol-faint);
+  font-size: 11.5px;
+}
+.qcol-identity-error {
+  background: #fdecec;
+  border-color: #f5c2c2;
+  color: #c02626;
+}
 
 /* ---------- current selections strip ---------- */
 
@@ -125,6 +195,7 @@
 /* ---------- comments list ---------- */
 
 .qcol-list {
+  position: relative;   /* offset parent for scroll-to-comment maths */
   flex: 1;
   overflow-y: auto;
   padding: 12px 12px 6px;
@@ -285,6 +356,37 @@
 .qcol-actions a:hover { color: var(--qcol-ink); }
 .qcol-applysel { color: var(--qcol-green) !important; font-weight: 500; }
 .qcol-delete:hover { color: #dc2626 !important; }
+
+/* comment highlight when arrived at from a notification */
+.qcol-flash {
+  animation: qcol-flash 2.2s ease-out;
+}
+@keyframes qcol-flash {
+  0%, 55% {
+    border-color: var(--qcol-green);
+    box-shadow: 0 0 0 3px rgba(0, 152, 69, .18);
+  }
+  100% {
+    border-color: var(--qcol-line);
+    box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+  }
+}
+
+/* transient message (navigation hints) */
+.qcol-toast {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 130px;
+  z-index: 5;
+  background: rgba(31, 41, 55, .93);
+  color: #fff;
+  border-radius: 7px;
+  padding: 7px 11px;
+  font-size: 11.5px;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(16, 24, 40, .2);
+}
 
 /* ---------- compose area ---------- */
 

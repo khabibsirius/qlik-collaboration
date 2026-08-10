@@ -97,6 +97,18 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
                   label: "Fallback refresh interval (seconds)",
                   type: "number",
                   defaultValue: 3
+                },
+                identityMode: {
+                  ref: "collab.identityMode",
+                  label: "User identity",
+                  type: "string",
+                  component: "dropdown",
+                  options: [
+                    { value: "auto", label: "Auto — Qlik identity, manual name if unavailable" },
+                    { value: "qlik", label: "Qlik identity only — name cannot be typed" },
+                    { value: "manual", label: "Manual name entry (development)" }
+                  ],
+                  defaultValue: "auto"
                 }
               }
             }
@@ -113,9 +125,20 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       var apiUrl = (layout.collab && layout.collab.apiUrl) || "http://localhost:5000";
       var pollMs = ((layout.collab && layout.collab.pollSeconds) || 3) * 1000;
 
-      // Build the UI once; later paints only update config.
+      // Build the UI once; later paints only re-apply changed settings.
+      // (Qlik re-paints on resize and after every property-panel edit, so this
+      // path must honour setting changes — not silently ignore them.)
       if (self._built) {
         self._apiUrl = apiUrl;
+        if (self._identityMode !== identityMode) {
+          self._identityMode = identityMode;
+          self._applyIdentityMode();
+        }
+        if (self._pollMs !== pollMs) {
+          self._pollMs = pollMs;
+          if (self._timer) clearInterval(self._timer);
+          self._timer = setInterval(self._tick, self._live ? 30000 : pollMs);
+        }
         return qlik.Promise.resolve();
       }
       self._built = true;
@@ -149,11 +172,18 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '  </div>' +
         '  <div class="qcol-selections" title="Current selections (captured with your comment)"></div>' +
         '  <div class="qcol-list"></div>' +
+        '  <div class="qcol-toast" style="display:none"></div>' +
         '  <div class="qcol-compose">' +
         '    <div class="qcol-replybar" style="display:none">' +
         '      Replying to <b class="qcol-replyname"></b>' +
         '      <a href="#" class="qcol-cancelreply">×</a>' +
         '    </div>' +
+        '    <div class="qcol-identity" style="display:none">' +
+        '      <span class="qcol-identity-avatar"></span>' +
+        '      <span class="qcol-identity-name"></span>' +
+        '      <span class="qcol-identity-lock" title="Signed in through Qlik Sense — this name cannot be changed">🔒</span>' +
+        '    </div>' +
+        '    <div class="qcol-identity-wait" style="display:none">Identifying you through Qlik Sense…</div>' +
         '    <input class="qcol-author" type="text" placeholder="Your name" maxlength="60"/>' +
         '    <div class="qcol-attachrow">' +
         '      <select class="qcol-attach"><option value="">＋ attach chart…</option></select>' +
@@ -180,25 +210,135 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       var $input = $element.find(".qcol-input");
       var $conn = $element.find(".qcol-conn");
 
-      $author.val(localStorage.getItem("qlikCollab.author") || "");
+      // ---------- identity ----------
+      // On Enterprise every user is already authenticated by the Qlik Proxy (AD),
+      // so we ask Qlik who they are and show that identity read-only — nobody can
+      // post under someone else's name. On Desktop Qlik reports UserDirectory=
+      // Personal (no real auth), so "auto" falls back to a typed name for dev.
+      //   auto   — Qlik identity when real, manual otherwise (default)
+      //   qlik   — always the Qlik identity; no manual entry, ever
+      //   manual — typed name (development only)
+      // kept on `self` (not a closure var) so a property-panel change during a
+      // later paint is picked up by the resolver below
+      self._identityMode = (layout.collab && layout.collab.identityMode) || "auto";
+      self._authorDirectory = null;
 
-      // On Enterprise the user is already authenticated (AD via Qlik Proxy) —
-      // ask Qlik who they are and lock the name field to that identity.
-      // On Desktop this returns UserDirectory=Personal, so the field stays editable.
-      try {
-        app.global.getAuthenticatedUser().then(function (reply) {
-          var s = (reply && reply.qReturn) || "";
-          var uid = (s.match(/UserId=([^;]+)/i) || [])[1];
-          var dir = (s.match(/UserDirectory=([^;]+)/i) || [])[1];
-          if (uid && dir && dir.trim().toLowerCase() !== "personal") {
-            $author.val(uid.trim())
-              .prop("readonly", true)
-              .addClass("qcol-author-locked")
-              .attr("title", "Signed in via Qlik Sense: " + dir.trim() + "\\" + uid.trim());
-            refreshNotifs();
+      function showManualIdentity() {
+        self._authorDirectory = null;
+        $element.find(".qcol-identity, .qcol-identity-wait").hide();
+        $element.find(".qcol-identity-wait").removeClass("qcol-identity-error");
+        $element.find(".qcol-send").prop("disabled", false);
+        $author.show().val(localStorage.getItem("qlikCollab.author") || "");
+        self._lastPayload = "";
+        refresh();
+        refreshNotifs();
+      }
+
+      function showQlikIdentity(uid, dir) {
+        self._authorDirectory = dir || null;
+        $author.val(uid).hide();
+        $element.find(".qcol-send").prop("disabled", false);
+        $element.find(".qcol-identity-wait").hide().removeClass("qcol-identity-error");
+        $element.find(".qcol-identity-avatar")
+          .text(initials(uid))
+          .css("background", avatarColor(uid));
+        $element.find(".qcol-identity-name").text(uid);
+        $element.find(".qcol-identity")
+          .attr("title", "Signed in through Qlik Sense as " + (dir ? dir + "\\" : "") + uid)
+          .css("display", "flex");
+        // re-render: which comments are "mine" (delete link) depends on the identity
+        self._lastPayload = "";
+        refresh();
+        refreshNotifs();
+      }
+
+      function identityBlocked(msg) {
+        $author.hide();
+        $element.find(".qcol-identity").hide();
+        $element.find(".qcol-identity-wait").text("⚠ " + msg).addClass("qcol-identity-error").show();
+        $element.find(".qcol-send").prop("disabled", true);
+      }
+
+      // The engine answers in one of two shapes depending on the deployment —
+      // both verified against a live engine, so parse either:
+      //   Enterprise : "UserDirectory=BANK; UserId=ivanov"
+      //   Desktop    : "Personal\Me"
+      function parseQlikUser(raw) {
+        var s = String(raw === undefined || raw === null ? "" : raw).trim();
+        if (!s) return null;
+        var uid = (s.match(/UserId\s*=\s*([^;]+)/i) || [])[1];
+        var dir = (s.match(/UserDirectory\s*=\s*([^;]+)/i) || [])[1];
+        if (!uid && s.indexOf("\\") !== -1) {        // "DIRECTORY\user"
+          var parts = s.split("\\");
+          dir = parts[0];
+          uid = parts.slice(1).join("\\");
+        }
+        if (!uid) uid = s;                           // bare user name
+        uid = uid.trim();
+        dir = dir ? dir.trim() : null;
+        return uid ? { uid: uid, dir: dir } : null;
+      }
+
+      function resolveQlikIdentity() {
+        var settled = false;
+
+        function fallback(msg) {
+          if (settled) return;
+          settled = true;
+          if (self._identityMode === "qlik") identityBlocked(msg); else showManualIdentity();
+        }
+
+        function handleReply(reply) {
+          if (settled) return;
+          var raw = (reply && reply.qReturn !== undefined) ? reply.qReturn : reply;
+          var u = parseQlikUser(raw);
+          if (!u) { fallback("Qlik returned no user name."); return; }
+          // Desktop has no real login — everyone is Personal\Me. Only trust it as
+          // an identity on a server, or when the admin explicitly forced "qlik".
+          var isPersonal = !u.dir || u.dir.toLowerCase() === "personal";
+          if (!isPersonal || self._identityMode === "qlik") {
+            settled = true;
+            showQlikIdentity(u.uid, u.dir);
+          } else {
+            fallback("Qlik reports no authenticated login (Desktop).");
           }
-        }).catch(function () { /* stay manual */ });
-      } catch (e) { /* older Capability API — stay manual */ }
+        }
+
+        try {
+          var g = (app && app.global) ||
+                  (typeof qlik.getGlobal === "function" ? qlik.getGlobal() : null);
+          if (!g || typeof g.getAuthenticatedUser !== "function") {
+            fallback("Qlik identity API unavailable.");
+            return;
+          }
+          // Capability API methods take a callback and usually also return a
+          // promise — accept whichever this Qlik version provides.
+          var p = g.getAuthenticatedUser(function (reply) { handleReply(reply); });
+          if (p && typeof p.then === "function") {
+            p.then(handleReply, function () { fallback("Could not read your Qlik identity."); });
+          }
+          // never leave the panel stuck on "Identifying you…"
+          setTimeout(function () { fallback("Qlik identity request timed out."); }, 5000);
+        } catch (e) {
+          fallback("Qlik identity API unavailable.");
+        }
+      }
+
+      function applyIdentityMode() {
+        if (self._identityMode === "manual") {
+          showManualIdentity();
+        } else {
+          $author.hide();
+          $element.find(".qcol-identity").hide();
+          $element.find(".qcol-identity-wait")
+            .removeClass("qcol-identity-error")
+            .text("Identifying you through Qlik Sense…")
+            .show();
+          resolveQlikIdentity();
+        }
+      }
+      self._applyIdentityMode = applyIdentityMode;
+      applyIdentityMode();
 
       // ---------- selection tracking (Capability API) ----------
       self._selState = app.selectionState();
@@ -429,6 +569,14 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       // ---------- notifications (Etap 2) ----------
 
+      var KIND_ICON = { mention: "@", reply: "↩", broadcast: "📢", status_change: "✎" };
+      var KIND_TEXT = {
+        mention: "mentioned you",
+        reply: "replied to you",
+        broadcast: "commented",
+        status_change: "changed the status"
+      };
+
       function refreshNotifs() {
         var me = $author.val().trim();
         if (!me) return;
@@ -438,21 +586,113 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             self._notifs = list || [];
             var unread = self._notifs.filter(function (n) { return !n.isRead; }).length;
             var $badge = $element.find(".qcol-badge");
-            if (unread > 0) $badge.text(unread).show(); else $badge.hide();
-            var KIND_ICON = { mention: "@", reply: "↩", status_change: "✎" };
+            if (unread > 0) $badge.text(unread > 99 ? "99+" : unread).show(); else $badge.hide();
+
+            // Rebuilding the open dropdown on every poll would reset its scroll
+            // under the user's cursor — only redraw when something changed.
+            var payload = JSON.stringify(self._notifs);
+            if (payload === self._notifPayload) return;
+            self._notifPayload = payload;
+
             $element.find(".qcol-notifs-list").html(
               self._notifs.length
                 ? self._notifs.map(function (n) {
-                    return '<div class="qcol-notif' + (n.isRead ? "" : " qcol-notif-unread") + '">' +
+                    var here = n.appId === self._appId && n.sheetId === self._sheetId;
+                    return '<div class="qcol-notif' + (n.isRead ? "" : " qcol-notif-unread") + '"' +
+                           ' data-id="' + n.id + '" data-comment="' + n.commentId + '"' +
+                           ' data-app="' + esc(n.appId) + '" data-sheet="' + esc(n.sheetId) + '"' +
+                           ' title="' + (here ? "Show this comment" : "Open the sheet with this comment") + '">' +
                            '<span class="qcol-notif-kind">' + (KIND_ICON[n.kind] || "•") + "</span>" +
-                           "<b>" + esc(n.fromAuthor) + "</b> " + esc(n.excerpt) +
-                           '<span class="qcol-notif-time">' + fmtTime(n.createdAt) + "</span></div>";
+                           '<span class="qcol-notif-text"><b>' + esc(n.fromAuthor) + "</b> " +
+                           esc(KIND_TEXT[n.kind] || "") + ": " + esc(n.excerpt) + "</span>" +
+                           '<span class="qcol-notif-time">' + fmtTime(n.createdAt) + "</span>" +
+                           (here ? "" : '<span class="qcol-notif-away" title="On another sheet">↗</span>') +
+                           "</div>";
                   }).join("")
                 : '<div class="qcol-empty">No notifications</div>'
             );
           })
           .catch(function () {});
       }
+
+      // ---------- jumping to the comment a notification points at ----------
+
+      function toast(msg) {
+        var $t = $element.find(".qcol-toast");
+        $t.text(msg).stop(true, true).fadeIn(120);
+        clearTimeout(self._toastTimer);
+        self._toastTimer = setTimeout(function () { $t.fadeOut(300); }, 3500);
+      }
+
+      function highlightComment(commentId) {
+        var $item = $list.find('.qcol-item[data-id="' + commentId + '"]');
+        if (!$item.length) {
+          toast("That comment is no longer on this sheet.");
+          return false;
+        }
+        // scroll inside the list only — never move the Qlik sheet behind us
+        var top = $item.position().top + $list.scrollTop() - ($list.height() / 2) + ($item.height() / 2);
+        $list.scrollTop(Math.max(0, top));
+        var $card = $item.find(".qcol-msg").addClass("qcol-flash");
+        setTimeout(function () { $card.removeClass("qcol-flash"); }, 2200);
+        return true;
+      }
+
+      function gotoComment(appId, sheetId, commentId) {
+        if (appId !== self._appId) {
+          toast("This comment belongs to another app — open that app to see it.");
+          return;
+        }
+        if (sheetId !== self._sheetId) {
+          // hand the target to the panel on the destination sheet
+          try {
+            sessionStorage.setItem("qlikCollab.goto",
+              JSON.stringify({ appId: appId, sheetId: sheetId, commentId: commentId }));
+          } catch (e) { /* private mode — navigation still works, just no highlight */ }
+          try {
+            // gotoSheet reports failure by return value, not by throwing
+            var nav = qlik.navigation.gotoSheet(sheetId);
+            if (nav && nav.success === false) {
+              try { sessionStorage.removeItem("qlikCollab.goto"); } catch (e2) { /* noop */ }
+              toast("Could not open that sheet: " + (nav.errorMsg || "unknown error"));
+            }
+          } catch (e) {
+            try { sessionStorage.removeItem("qlikCollab.goto"); } catch (e2) { /* noop */ }
+            toast("Could not open that sheet.");
+          }
+          return;
+        }
+        highlightComment(commentId);
+      }
+
+      // after navigating from another sheet, highlight the comment we came for
+      function consumePendingGoto() {
+        var raw = null;
+        try { raw = sessionStorage.getItem("qlikCollab.goto"); } catch (e) { return; }
+        if (!raw) return;
+        var t = null;
+        try { t = JSON.parse(raw); } catch (e) { /* corrupt — drop it below */ }
+        if (!t || t.appId !== self._appId || t.sheetId !== self._sheetId) return;
+        try { sessionStorage.removeItem("qlikCollab.goto"); } catch (e) { /* noop */ }
+        setTimeout(function () { highlightComment(String(t.commentId)); }, 300);
+      }
+
+      $element.on("click", ".qcol-notif", function () {
+        var $n = $(this);
+        var me = $author.val().trim();
+        var notifId = $n.attr("data-id");
+
+        if (me && $n.hasClass("qcol-notif-unread")) {
+          $n.removeClass("qcol-notif-unread");   // instant feedback
+          fetch(self._apiUrl + "/api/notifications/" + notifId + "/read?user=" + encodeURIComponent(me),
+                { method: "PUT" })
+            .then(refreshNotifs)
+            .catch(function () {});
+        }
+
+        $element.find(".qcol-notifs").hide();
+        gotoComment($n.attr("data-app"), $n.attr("data-sheet"), $n.attr("data-comment"));
+      });
 
       $element.on("click", ".qcol-bell", function () {
         $element.find(".qcol-notifs").toggle();
@@ -461,6 +701,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       $element.on("click", ".qcol-markread", function (e) {
         e.preventDefault();
+        e.stopPropagation();
         var me = $author.val().trim();
         if (!me) return;
         fetch(self._apiUrl + "/api/notifications/read?user=" + encodeURIComponent(me), { method: "PUT" })
@@ -567,9 +808,15 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
 
       function render(comments) {
+        // Soft-deleting a parent keeps its replies (schema.sql), so a reply can
+        // arrive with a parent that is no longer in the list — show it as a root
+        // instead of dropping it from the panel entirely.
+        var present = {};
+        comments.forEach(function (c) { present[c.id] = true; });
+
         var byParent = {};
         comments.forEach(function (c) {
-          var key = c.parentId || "root";
+          var key = (c.parentId && present[c.parentId]) ? c.parentId : "root";
           (byParent[key] = byParent[key] || []).push(c);
         });
         var roots = byParent["root"] || [];
@@ -634,6 +881,11 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
               self._lastPayload = payload;
               render(data);
             }
+            // first successful load: did we arrive here from a notification?
+            if (!self._gotoChecked) {
+              self._gotoChecked = true;
+              consumePendingGoto();
+            }
           })
           .catch(function () { $conn.addClass("qcol-err").removeClass("qcol-ok"); });
       }
@@ -670,6 +922,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             objectIds: self._attachTargets,
             parentId: self._replyTo,
             author: author,
+            authorDirectory: self._authorDirectory,
             body: body,
             selectionState: withSel ? JSON.stringify(self._currentSelections) : null
           })
@@ -763,8 +1016,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             if (d && d.appId === self._appId && d.sheetId === self._sheetId) refresh();
           });
           conn.on("notify", function (d) {
-            var me = $author.val().trim();
-            if (d && me && d.username && d.username.toLowerCase() === me.toLowerCase()) refreshNotifs();
+            var me = ($author.val() || "").trim().toLowerCase();
+            if (!d || !me) return;
+            // server sends one message listing everyone it notified
+            var targets = d.usernames || (d.username ? [d.username] : []);
+            for (var i = 0; i < targets.length; i++) {
+              if (String(targets[i]).toLowerCase() === me) { refreshNotifs(); return; }
+            }
           });
 
           conn.onreconnected(function () { $conn.addClass("qcol-live"); tick(); });
@@ -783,6 +1041,8 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
 
       // ---------- start ----------
+      self._tick = tick;          // re-paints reuse these when settings change
+      self._pollMs = pollMs;
       refreshUsers();
       tick();
       if (self._timer) clearInterval(self._timer);

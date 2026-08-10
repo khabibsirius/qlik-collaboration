@@ -35,7 +35,9 @@ public class NotificationsController : ControllerBase
                      c.author AS from_author, left(c.body, 80) AS excerpt,
                      c.app_id, c.sheet_id
               FROM notifications n
-              JOIN comments c ON c.id = n.comment_id
+              -- skip notifications whose comment was deleted: clicking one would
+              -- navigate the user to a sheet where there is nothing to show
+              JOIN comments c ON c.id = n.comment_id AND c.is_deleted = FALSE
               WHERE n.username = @user
               ORDER BY n.created_at DESC
               LIMIT 50", new { user });
@@ -50,5 +52,17 @@ public class NotificationsController : ControllerBase
             "UPDATE notifications SET is_read = TRUE WHERE username = @user AND is_read = FALSE",
             new { user });
         return NoContent();
+    }
+
+    /// <summary>Mark one notification as read (when the user opens it).
+    /// Scoped by username so one user cannot clear another's notifications.</summary>
+    [HttpPut("{id:int}/read")]
+    public async Task<IActionResult> MarkOneRead(int id, [FromQuery] string user)
+    {
+        await using var conn = await _db.OpenConnectionAsync();
+        var affected = await conn.ExecuteAsync(
+            "UPDATE notifications SET is_read = TRUE WHERE id = @id AND username = @user",
+            new { id, user });
+        return affected > 0 ? NoContent() : NotFound();
     }
 }

@@ -30,15 +30,29 @@ All non-deleted comments for a sheet (including replies), oldest first.
 ```json
 {
   "appId": "…", "sheetId": "…",
-  "objectId": null,          // optional: Qlik object id (Etap 5)
-  "parentId": null,          // optional: reply to comment id
-  "author": "Diyorbek",
+  "objectIds": ["BAR_e108", "PIE_cb82"],   // optional: Qlik object ids (Etap 5)
+  "parentId": null,                        // optional: reply to comment id
+  "author": "ivanov",
+  "authorDirectory": "BANK",               // optional: Qlik UserDirectory, audit only
   "body": "text",
   "selectionState": "[{\"field\":\"Bank\",\"values\":[\"NBU\"]}]"   // optional JSON string (Etap 6)
 }
 ```
 
 Returns `201` with the created comment.
+
+**Notification routing** — who gets notified by this comment:
+
+| Comment contains | Who is notified | `kind` |
+|---|---|---|
+| `@name` of known users | only those users | `mention` |
+| nothing (a reply) | the parent comment's author | `reply` |
+| no `@mention` at all | **everyone except the author** | `broadcast` |
+
+A comment addressed to nobody in particular is team-wide news, so it reaches the
+whole team — otherwise it would reach nobody until someone happened to open the
+sheet. Turn it off with `Notifications:BroadcastWhenNoMention: false` in
+`appsettings.json` (then only mentions and replies notify).
 
 ## DELETE /api/comments/{id}?author=
 
@@ -65,9 +79,17 @@ Latest 50 notifications for a user (mentions + replies), newest first:
    "fromAuthor": "Ivan", "excerpt": "@khabib please check this", "appId": "…", "sheetId": "…" }]
 ```
 
+Each notification carries `commentId`, `appId` and `sheetId` — everything the panel
+needs to jump to the comment when the user clicks it.
+
 ## PUT /api/notifications/read?user=
 
 Marks all of the user's notifications as read. `204`.
+
+## PUT /api/notifications/{id}/read?user=
+
+Marks one notification as read (used when the user opens it). Scoped by username,
+so one user cannot clear another's notifications — `404` if it isn't theirs.
 
 ## POST /api/comments/{id}/attachments
 
