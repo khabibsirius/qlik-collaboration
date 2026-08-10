@@ -1,151 +1,208 @@
 # Deployment
 
-Two supported ways to run the backend. Pick one:
+## Pick your path
 
-| | Docker Compose | Windows Service |
+| | What it runs | Use when |
 |---|---|---|
-| Host | Linux VM (recommended) or a Windows machine with Docker Desktop | Windows Server, no Docker |
-| Brings its own PostgreSQL | yes | no — point it at an existing instance |
-| Bank change-control friendliness | needs a container runtime approved | usually easier: just a service + an exe |
-| Command | `docker compose up -d` | `deploy\install-windows-service.ps1` |
+| **A — Docker + existing PostgreSQL** | API in a container, database already on the server | **Docker and PostgreSQL are already installed** (the usual case) |
+| **B — Windows Service** | API as a plain Windows service, database already on the server | No Docker, or bank policy forbids containers |
+| **C — All-in-one Docker** | API **and** PostgreSQL, both in containers | Fresh host with nothing installed |
 
-> **Windows Server + Docker — read this first.**
-> Our containers are *Linux* containers. Windows Server runs *Windows* containers
-> natively; Linux containers there need Docker Desktop (which targets Windows 10/11)
-> or a Linux VM. PostgreSQL has no official Windows-container image either. So on a
-> Windows Server the realistic choices are: run the Compose stack on a **Linux VM**,
-> or use the **Windows Service** path below.
->
-> **Verification status:** Option B (Windows Service) is the tested path — the
-> published service binary was run with a service-style environment block and
-> confirmed working. The Compose files in Option A are written and reviewed but
-> have not been executed end-to-end; treat them as a starting point if a Linux
-> host ever becomes available.
+All three need the extension imported into the QMC — see [The Qlik extension](#the-qlik-extension).
 
 ---
 
-## Option A — Docker Compose
+## Step 0 — which container mode is Docker in?
 
-### 1. Configure
+Docker on Windows runs **either** Windows containers **or** Linux containers, and they
+need different images. Check first:
 
-```bash
-cp .env.example .env
-# edit .env: set a real POSTGRES_PASSWORD, and QLIK_ORIGIN to your Qlik host
+```powershell
+docker info --format "{{.OSType}}"
 ```
 
-`.env` is git-ignored. The stack refuses to start without `POSTGRES_PASSWORD`.
+| Result | Compose file | Dockerfile |
+|---|---|---|
+| `windows` | `docker-compose.windows.yml` | `Dockerfile.windows` (Nano Server) |
+| `linux` | `docker-compose.hostdb.yml` | `Dockerfile` (Debian) |
 
-### 2. Start
+`deploy\docker-deploy.ps1` detects this automatically and picks the right pair — you
+do not have to remember it.
 
-```bash
-docker compose up -d --build
-docker compose ps          # both services should be "healthy"
-curl http://localhost:5000/health
-# {"status":"healthy","database":"up"}
+> **Windows containers:** the image tag must match the host OS or the container will
+> not start (containers share the host kernel). Check with `(Get-ComputerInfo).OsName`
+> and set `WINDOWS_TAG` in `.env`: Server 2019 → `ltsc2019`, 2022 → `ltsc2022`,
+> 2025 → `ltsc2025`.
+
+---
+
+## Option A — Docker with the existing PostgreSQL
+
+### 1. Prepare the database (once)
+
+```powershell
+psql -U postgres -c "CREATE DATABASE qlik_collaboration;"
+psql -U postgres -d qlik_collaboration -f database\schema.sql
 ```
 
-`database/schema.sql` is mounted into the Postgres init directory, so the tables are
-created automatically the first time the data volume is empty.
+### 2. Let the container reach the host PostgreSQL
 
-### 3. Everyday commands
+A container is a separate machine on its own network, so a default PostgreSQL install
+will refuse it. Two files must change (both live in the PostgreSQL data directory,
+typically `C:\Program Files\PostgreSQL\16\data`):
 
-```bash
-docker compose logs -f api      # follow the API log
-docker compose restart api      # after changing .env
-docker compose down             # stop; comments and attachments are KEPT
-docker compose down -v          # stop and DESTROY the data volumes
-docker compose up -d --build    # deploy a new version of the code
+**`postgresql.conf`** — listen on all interfaces, not just localhost:
+
+```conf
+listen_addresses = '*'
 ```
 
-### 4. Backups
+**`pg_hba.conf`** — allow the container subnet. Add one line:
 
-Two volumes hold everything: `pgdata` (comments) and `uploads` (attachments).
+```conf
+# Linux containers (Docker's default bridge range)
+host    all    all    172.16.0.0/12    scram-sha-256
 
-```bash
-# database dump
-docker compose exec db pg_dump -U qlik qlik_collaboration > backup-$(date +%F).sql
-
-# attachments
-docker run --rm -v qlikchatext_uploads:/data -v "$PWD":/out alpine \
-    tar czf /out/uploads-$(date +%F).tar.gz -C /data .
+# Windows containers (Docker's default NAT range) - check yours with:
+#   docker network inspect nat --format "{{(index .IPAM.Config 0).Subnet}}"
+host    all    all    172.16.0.0/12    scram-sha-256
 ```
 
-Restore the dump with `psql -U qlik -d qlik_collaboration < backup.sql`.
+Then restart PostgreSQL:
+
+```powershell
+Restart-Service postgresql-x64-16
+```
+
+> Do not use `0.0.0.0/0` unless the server is isolated — it accepts connections from
+> anywhere that can reach the port.
+
+### 3. Configure
+
+```powershell
+Copy-Item .env.example .env
+notepad .env      # set DB_PASSWORD, QLIK_ORIGIN, and WINDOWS_TAG if using Windows containers
+```
+
+`DB_HOST` defaults to `host.docker.internal`, which resolves to the host machine from
+inside the container. If that name does not resolve on your engine (it can be missing
+outside Docker Desktop), put the **server's own LAN IP** there — never `127.0.0.1`,
+which inside a container means the container itself.
+
+### 4. Preflight, then start
+
+```powershell
+.\deploy\docker-deploy.ps1 -Preflight     # checks mode, tag, DB reachability, listen_addresses, pg_hba
+.\deploy\docker-deploy.ps1                # builds and starts, then verifies /health
+```
+
+Expected finish:
+
+```
+Running and connected to the database.
+  health : http://localhost:5000/health
+```
+
+### 5. Everyday commands
+
+```powershell
+.\deploy\docker-deploy.ps1 -Logs      # follow the API log
+.\deploy\docker-deploy.ps1 -Down      # stop; the attachments volume is kept
+.\deploy\docker-deploy.ps1            # redeploy after a code change
+```
+
+### 6. Open the firewall
+
+The extension runs in **each user's browser**, so the port must be reachable from user
+workstations — not only from the Qlik servers:
+
+```powershell
+New-NetFirewallRule -DisplayName "Qlik Collaboration API" -Direction Inbound `
+    -Action Allow -Protocol TCP -LocalPort 5000 -Profile Any
+```
 
 ---
 
 ## Option B — Windows Service (no Docker)
 
-**This is the path for a Windows-only environment.**
+Prerequisites: the **.NET 8 Hosting Bundle** on the server
+(<https://dotnet.microsoft.com/download/dotnet/8.0>) and the database prepared as in
+Option A step 1. No `postgresql.conf`/`pg_hba.conf` changes are needed if the database
+is on the same machine — the service connects over localhost like any local program.
 
-Prerequisites on the app server:
-
-1. **.NET 8 Hosting Bundle** (or just the ASP.NET Core Runtime) —
-   <https://dotnet.microsoft.com/download/dotnet/8.0>. The build machine needs the
-   SDK; the server needs only the runtime.
-2. **PostgreSQL reachable** — the bank's existing instance, or installed on this
-   server — with the database and schema created:
-
-```powershell
-psql -U postgres -c "CREATE DATABASE qlik_collaboration;"
-psql -U postgres -d qlik_collaboration -f database\schema.sql
-```
-
-3. The install script must be run from an **elevated** PowerShell (it creates a
-   service and a firewall rule).
-
-```powershell
-# once, on the database server
-psql -U postgres -c "CREATE DATABASE qlik_collaboration;"
-psql -U postgres -d qlik_collaboration -f database\schema.sql
-```
-
-Then from an **elevated** PowerShell on the app server:
+From an **elevated** PowerShell:
 
 ```powershell
 .\deploy\install-windows-service.ps1 `
-    -DbHost pg.bank.local `
-    -DbUser qlik `
-    -DbPassword '<password>' `
+    -DbHost localhost -DbUser postgres -DbPassword '<password>' `
     -QlikOrigin https://qlik.bank.local `
     -ListenUrl 'http://+:5000'
 ```
 
-The script publishes the app, installs the service (auto-start, auto-restart on
-crash), stores the connection string in the service's own environment block in the
-registry rather than a world-readable file, opens the firewall port, starts it and
-verifies `/health`.
+It publishes the app, installs an auto-starting service that restarts on crash, stores
+the connection string in the service's own registry environment block rather than a
+readable file, opens the firewall port, and verifies `/health` before reporting success.
 
 ```powershell
 Get-Service QlikCollaboration
-.\deploy\install-windows-service.ps1 -Uninstall      # remove it again
+.\deploy\install-windows-service.ps1 -Uninstall
 ```
 
-Redeploying a new version = run the same install command again; it stops the
-service, replaces the files and restarts.
+Redeploying = run the same command again; it stops the service, replaces the files and
+restarts.
 
 ---
 
-## The Qlik extension (both options)
+## Option C — All-in-one Docker (API + PostgreSQL)
+
+Only for a host that has no PostgreSQL. Linux containers only.
 
 ```powershell
-.\deploy\package-extension.ps1     # -> dist\qlik-collaboration.zip
+Copy-Item .env.example .env    # set POSTGRES_PASSWORD
+docker compose up -d --build
 ```
 
-QMC → **Extensions** → **Import** → pick the zip. Qlik distributes it to every node;
-never copy extension files to nodes by hand — a node re-sync overwrites them.
+`database/schema.sql` is mounted into the Postgres init directory and applied
+automatically the first time the data volume is empty.
 
-Then in each app: edit the sheet → drop the panel on it → set **Backend API URL** to
-the server (e.g. `https://bi-collab.bank.local:5443`) and **User identity** to
-*"Qlik identity only"*.
+---
+
+## The Qlik extension
+
+```powershell
+.\deploy\package-extension.ps1        # -> dist\qlik-collaboration.zip
+```
+
+1. QMC → **Extensions** → **Import** → pick the zip. Qlik distributes it to every node;
+   never copy extension files to nodes by hand — a node re-sync overwrites them.
+2. QMC → **Content Security Policy** → add the backend origin with `connect-src`
+   (and `ws:`/`wss:` for SignalR). **Without this, Enterprise silently blocks every
+   call the panel makes.**
+3. In each app: edit the sheet → drop the panel on it → set **Backend API URL** to the
+   server, and **User identity** to *"Qlik identity only"*.
+
+---
+
+## HTTPS
+
+If Qlik Sense is served over HTTPS — it normally is — the browser **blocks** calls from
+the extension to an `http://` backend as mixed content. The backend must be HTTPS too:
+
+- **Terminate TLS in front** (IIS or the bank's reverse proxy) and forward to the
+  container/service over HTTP. The proxy must forward WebSocket upgrade headers, or
+  SignalR silently falls back to polling.
+- **Or bind a certificate directly**: `ASPNETCORE_URLS=https://+:5443` plus
+  `ASPNETCORE_Kestrel__Certificates__Default__Path` and `__Password`.
+
+Then set the extension's Backend API URL to `https://…`.
 
 ---
 
 ## Configuration reference
 
-Every setting can come from `appsettings.json` **or** an environment variable
-(`__` separates nested keys). Environment variables win, which is how both
-deployment options inject secrets.
+Every setting comes from `appsettings.json` **or** an environment variable (`__`
+separates nested keys). Environment variables win — that is how both Docker and the
+Windows Service inject secrets without writing them to a file.
 
 | Setting | Environment variable | Purpose |
 |---|---|---|
@@ -154,23 +211,26 @@ deployment options inject secrets.
 | `Storage:AttachmentsPath` | `Storage__AttachmentsPath` | where uploaded files are written |
 | `Cors:AllowedOrigins:0` | `Cors__AllowedOrigins__0` | allowed browser origin; `*` = any (dev only) |
 | `Notifications:BroadcastWhenNoMention` | `Notifications__BroadcastWhenNoMention` | notify the whole team when a comment has no @mention |
-| `Swagger:Enabled` | `Swagger__Enabled` | expose `/swagger` |
+| `Swagger:Enabled` | `Swagger__Enabled` | expose `/swagger` (keep off in production) |
 
 ---
 
-## Going to HTTPS
+## Backups
 
-If Qlik Sense is served over HTTPS — it normally is — the browser will **block** calls
-from the extension to an `http://` backend as mixed content. The backend must be
-HTTPS too. Either:
+Two things hold state: the **database** and the **attachments**.
 
-- **Terminate TLS in front** (IIS, nginx, or the bank's reverse proxy) and forward to
-  the container/service over HTTP. Make sure the proxy forwards WebSocket upgrade
-  headers, or SignalR silently falls back to polling.
-- **Or bind a certificate directly**: set `ASPNETCORE_URLS=https://+:5443` plus
-  `ASPNETCORE_Kestrel__Certificates__Default__Path` and `__Password`.
+```powershell
+# database
+pg_dump -U postgres qlik_collaboration > backup-2026-08-10.sql
 
-Then set the extension's Backend API URL to `https://…`.
+# attachments, Windows Service install
+Compress-Archive C:\Programs\QlikCollaboration\uploads uploads-2026-08-10.zip
+
+# attachments, Docker install (named volume)
+docker run --rm -v qlikchatext_uploads:/data -v ${PWD}:/out alpine tar czf /out/uploads.tar.gz -C /data .
+```
+
+`docker compose down` keeps the volumes; only `down -v` destroys them.
 
 ---
 
@@ -181,14 +241,36 @@ Measured, not estimated:
 | Item | Size |
 |---|---|
 | Published app payload | 7.7 MB |
-| API image (Debian-based .NET 8 runtime + app + curl) | ~230 MB |
-| `postgres:16-alpine` | ~250 MB |
+| API image, Linux (Debian .NET 8 runtime + app) | ~230 MB |
+| API image, Windows (Nano Server .NET 8 runtime + app) | ~300 MB |
 | Comment row incl. indexes | ~400 B |
 | Notification row incl. indexes | ~150 B |
 
-With a 20-person team, one comment plus its broadcast notifications is ~3.5 KB. At
-50 comments a day that is **~45 MB of database growth per year** — negligible.
-**Attachments dominate**: a voice message is ~0.5 MB per minute, and files are capped
-at 25 MB. Budget from expected attachment volume, not from the comment count.
+With a 20-person team, one comment plus its broadcast notifications is ~3.5 KB. At 50
+comments a day that is **~45 MB of database growth per year** — negligible.
+**Attachments dominate**: a voice message is ~0.5 MB per minute and files are capped at
+25 MB, so budget from expected attachment volume, not comment count.
 
-Recommended pilot VM: **2 vCPU, 4 GB RAM, 20–40 GB disk**.
+Recommended: **2 vCPU, 4 GB RAM, 20–40 GB disk**.
+
+> **Note on the first build:** the base images are 200–700 MB and must be pulled from
+> `mcr.microsoft.com` / Docker Hub. On a throttled or proxied bank network this can take
+> a long time or be blocked outright. If the pull fails, either configure the Docker
+> proxy, load the image from a `docker save`/`docker load` tarball prepared elsewhere,
+> or use Option B, which needs no image pulls at all.
+
+---
+
+## Verification status
+
+Honest record of what has actually been executed:
+
+| Piece | Status |
+|---|---|
+| Published binary running with a service-style environment block (`/health`, CORS lockdown, Swagger off, custom port) | **verified** |
+| `dotnet publish` output (7.7 MB) | **verified** |
+| All compose files (`config` validation, variable and volume-path resolution incl. `C:\data\uploads`) | **verified** |
+| `deploy\*.ps1` parse + `-Preflight` logic | **verified** |
+| `package-extension.ps1` producing the QMC zip | **verified** |
+| Docker image build and container run | **not executed** — the base-image pull ran at ~67 KB/s on the development network |
+| `sc.exe` service creation, registry environment block, firewall rule | **not executed** — needs an elevated session on the target server |

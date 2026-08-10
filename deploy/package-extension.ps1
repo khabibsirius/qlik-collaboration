@@ -4,7 +4,7 @@
 .DESCRIPTION
     Produces dist\qlik-collaboration.zip. In the QMC:
         Extensions -> Import -> pick the zip.
-    Qlik distributes it to every node automatically — never copy files to nodes by hand.
+    Qlik distributes it to every node automatically -- never copy files to nodes by hand.
 .EXAMPLE
     .\deploy\package-extension.ps1
 #>

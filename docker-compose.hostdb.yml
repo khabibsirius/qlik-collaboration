@@ -1,0 +1,39 @@
+# API container only, connecting to a PostgreSQL that is ALREADY installed on the
+# server (not in a container).
+#
+# For LINUX-container mode. If `docker info --format "{{.OSType}}"` says "windows",
+# use docker-compose.windows.yml instead.
+#
+#   copy .env.example to .env, set DB_PASSWORD, then:
+#     docker compose -f docker-compose.hostdb.yml up -d --build
+#
+# The container must be allowed to reach the host database — see
+# docs/Deployment.md, "Letting the container reach the host PostgreSQL":
+#   1. postgresql.conf : listen_addresses = '*'
+#   2. pg_hba.conf     : a host entry for the container subnet
+
+services:
+  api:
+    build:
+      context: ./backend/QlikCollaboration.Api
+    image: qlik-collaboration-api:latest
+    container_name: qlikcollab-api
+    restart: unless-stopped
+    environment:
+      # host.docker.internal resolves to the host machine. If it does not resolve,
+      # put the server's own LAN IP in DB_HOST instead.
+      ConnectionStrings__Postgres: "Host=${DB_HOST:-host.docker.internal};Port=${DB_PORT:-5432};Database=${DB_NAME:-qlik_collaboration};Username=${DB_USER:-postgres};Password=${DB_PASSWORD:?DB_PASSWORD must be set in .env}"
+      Cors__AllowedOrigins__0: ${QLIK_ORIGIN:-*}
+      Notifications__BroadcastWhenNoMention: "${BROADCAST_WHEN_NO_MENTION:-true}"
+      Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
+      ASPNETCORE_ENVIRONMENT: Production
+    ports:
+      - "${API_PORT:-5000}:5000"
+    volumes:
+      - uploads:/data/uploads
+    extra_hosts:
+      # makes host.docker.internal resolve on engines that don't provide it
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  uploads:

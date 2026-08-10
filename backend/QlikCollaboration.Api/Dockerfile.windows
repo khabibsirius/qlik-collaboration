@@ -1,0 +1,40 @@
+# Windows-container build. Use this when `docker info --format "{{.OSType}}"`
+# reports "windows". For Linux containers use the plain Dockerfile instead.
+#
+# IMPORTANT — the ltsc tag must match the host Windows Server version, otherwise
+# the container will not start (Windows containers share the host kernel):
+#     Windows Server 2019 -> ltsc2019
+#     Windows Server 2022 -> ltsc2022
+#     Windows Server 2025 -> ltsc2025
+# Check the host with:  (Get-ComputerInfo).OsName
+# Override without editing this file:
+#     docker build -f Dockerfile.windows --build-arg WINDOWS_TAG=ltsc2019 .
+
+ARG WINDOWS_TAG=ltsc2022
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0-windowsservercore-${WINDOWS_TAG} AS build
+WORKDIR C:\\src
+
+COPY QlikCollaboration.Api.csproj .
+RUN dotnet restore
+
+COPY . .
+RUN dotnet publish -c Release -o C:\\app --no-restore
+
+# Nano Server: ~110 MB compressed vs ~2 GB for Server Core, and enough for
+# ASP.NET Core. It ships ICU, so Cyrillic @mention matching stays correct.
+FROM mcr.microsoft.com/dotnet/aspnet:8.0-nanoserver-${WINDOWS_TAG} AS runtime
+WORKDIR C:\\app
+COPY --from=build C:\\app .
+
+# Attachments must live on a mounted volume, otherwise they are lost on redeploy.
+ENV ASPNETCORE_URLS=http://+:5000 `
+    Storage__AttachmentsPath=C:\\data\\uploads
+
+EXPOSE 5000
+
+# No HEALTHCHECK here on purpose: Nano Server has no curl/PowerShell to probe with.
+# Probe http://<host>:5000/health from outside instead (the endpoint exists and
+# reports database connectivity).
+
+ENTRYPOINT ["dotnet", "QlikCollaboration.Api.dll"]

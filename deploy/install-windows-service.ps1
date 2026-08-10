@@ -114,7 +114,7 @@ New-ItemProperty -Path $regPath -Name Environment -PropertyType MultiString `
 
 # --- firewall ----------------------------------------------------------------
 # The extension runs in each USER's browser, so the port must be reachable from
-# the user subnet — not only from the Qlik servers.
+# the user subnet -- not only from the Qlik servers.
 $port = ([uri]($ListenUrl -replace '\+', 'localhost')).Port
 Remove-NetFirewallRule -DisplayName "$ServiceName API" -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName "$ServiceName API" -Direction Inbound -Action Allow `
