@@ -14,7 +14,13 @@ Two supported ways to run the backend. Pick one:
 > natively; Linux containers there need Docker Desktop (which targets Windows 10/11)
 > or a Linux VM. PostgreSQL has no official Windows-container image either. So on a
 > Windows Server the realistic choices are: run the Compose stack on a **Linux VM**,
-> or use the **Windows Service** path below. Both are fully supported by this repo.
+> or use the **Windows Service** path below.
+>
+> **Verification status:** Option B (Windows Service) is the tested path — the
+> published service binary was run with a service-style environment block and
+> confirmed working. The Compose files in Option A are written and reviewed but
+> have not been executed end-to-end; treat them as a starting point if a Linux
+> host ever becomes available.
 
 ---
 
@@ -70,8 +76,23 @@ Restore the dump with `psql -U qlik -d qlik_collaboration < backup.sql`.
 
 ## Option B — Windows Service (no Docker)
 
-Requires: .NET 8 **runtime** (Hosting Bundle) on the server, and a reachable
-PostgreSQL instance with the schema applied.
+**This is the path for a Windows-only environment.**
+
+Prerequisites on the app server:
+
+1. **.NET 8 Hosting Bundle** (or just the ASP.NET Core Runtime) —
+   <https://dotnet.microsoft.com/download/dotnet/8.0>. The build machine needs the
+   SDK; the server needs only the runtime.
+2. **PostgreSQL reachable** — the bank's existing instance, or installed on this
+   server — with the database and schema created:
+
+```powershell
+psql -U postgres -c "CREATE DATABASE qlik_collaboration;"
+psql -U postgres -d qlik_collaboration -f database\schema.sql
+```
+
+3. The install script must be run from an **elevated** PowerShell (it creates a
+   service and a firewall rule).
 
 ```powershell
 # once, on the database server
