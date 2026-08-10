@@ -343,25 +343,63 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // ---------- selection tracking (Capability API) ----------
       self._selState = app.selectionState();
       self._currentSelections = [];
+      self._selSignature = "";
 
-      var onSel = function () {
-        var sels = (self._selState.selections || []).map(function (s) {
+      // A selected value may be numeric (Year, amounts, dates). Selecting such a
+      // field back by its TEXT alone silently matches nothing, so keep the number
+      // whenever we can prove the value really is numeric.
+      function numericOf(v) {
+        if (typeof v.qNumber !== "number" || !isFinite(v.qNumber)) return null;
+        if (v.qIsNumeric === true) return v.qNumber;
+        // qIsNumeric is not always present: fall back to "the text IS the number"
+        if (String(v.qNumber) === String(v.qName)) return v.qNumber;
+        return null;
+      }
+
+      function snapshotSelections() {
+        return ((self._selState && self._selState.selections) || []).map(function (s) {
+          var vals = s.selectedValues || [];
           return {
             field: s.fieldName || s.field,
-            values: (s.selectedValues || []).map(function (v) { return v.qName; }),
+            // plain strings: what the chips show, and the format older comments stored
+            values: vals.map(function (v) { return v.qName; }),
+            // text + number pairs, used when re-applying
+            raw: vals.map(function (v) {
+              var num = numericOf(v);
+              return num === null ? { text: v.qName } : { text: v.qName, number: num };
+            }),
             total: s.selectedCount
           };
         });
-        self._currentSelections = sels;
+      }
+
+      function renderSelections(sels) {
         var $box = $element.find(".qcol-selections");
         if (!sels.length) { $box.html('<span class="qcol-nosel">No selections</span>'); return; }
         $box.html(sels.map(function (s) {
           var vals = s.values.slice(0, 5).join(", ") + (s.total > s.values.length ? " …" : "");
           return '<span class="qcol-chip">' + esc(s.field) + ": " + esc(vals) + "</span>";
         }).join(" "));
-      };
-      self._selState.OnData.bind(onSel);
+      }
+
+      function onSel() {
+        var sels = snapshotSelections();
+        var sig = JSON.stringify(sels);
+        if (sig === self._selSignature) return;   // nothing changed: no work, no redraw
+        self._selSignature = sig;
+        self._currentSelections = sels;
+        renderSelections(sels);
+      }
+
+      try { self._selState.OnData.bind(onSel); } catch (e) { /* the poll below covers it */ }
       onSel();
+
+      // OnData does not fire reliably in every Sense deployment, and if it stays
+      // silent nothing is ever captured — the comment is then saved with no filters
+      // and no "apply filters" link appears for anyone. A cheap poll makes capture
+      // independent of the event; the signature check keeps it free when idle.
+      if (self._selTimer) clearInterval(self._selTimer);
+      self._selTimer = setInterval(onSel, 1000);
 
       // ---------- object picker (Etap 5, multi-select) ----------
       self._cellsById = {};
@@ -984,18 +1022,70 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         }).then(refresh);
       });
 
-      // Etap 6: re-apply the captured selection context
+      // Etap 6: re-apply the captured selection context.
+      // Failures used to be silent — every step now reports what went wrong.
+
+      function selectionItems(s) {
+        if (s.raw && s.raw.length) {
+          return s.raw.map(function (r) {
+            // qNumber is what actually matches a numeric field; qText alone does not
+            return (typeof r.number === "number")
+              ? { qText: r.text, qNumber: r.number }
+              : { qText: r.text };
+          });
+        }
+        // comments written before numbers were captured
+        return (s.values || []).map(function (v) { return { qText: v }; });
+      }
+
+      function applySelections(sels) {
+        var pending = sels.length;
+        var failed = [];
+
+        function step(field, err) {
+          if (err) {
+            console.error("qlik-collaboration: could not select in field '" + field + "'", err);
+            failed.push(field);
+          }
+          if (--pending > 0) return;
+          if (failed.length) toast("Could not apply: " + failed.join(", "));
+          else toast("Filters applied.");
+        }
+
+        self._app.clearAll().then(function () {
+          sels.forEach(function (s) {
+            var items = selectionItems(s);
+            if (!s.field || !items.length) { step(s.field); return; }
+            try {
+              var p = self._app.field(s.field).selectValues(items, false, true);
+              if (p && typeof p.then === "function") {
+                p.then(function () { step(s.field); },
+                       function (err) { step(s.field, err || "rejected"); });
+              } else {
+                step(s.field);
+              }
+            } catch (err) {
+              step(s.field, err);
+            }
+          });
+        }, function (err) {
+          console.error("qlik-collaboration: clearAll failed", err);
+          toast("Could not clear the current selections.");
+        });
+      }
+
       $element.on("click", ".qcol-applysel", function (e) {
         e.preventDefault();
         var sels;
-        try { sels = JSON.parse($(this).attr("data-sel")); } catch (err) { return; }
-        self._app.clearAll().then(function () {
-          sels.forEach(function (s) {
-            if (!s.field || !s.values || !s.values.length) return;
-            self._app.field(s.field).selectValues(
-              s.values.map(function (v) { return { qText: v }; }), false, true);
-          });
-        });
+        try {
+          sels = JSON.parse($(this).attr("data-sel"));
+        } catch (err) {
+          console.error("qlik-collaboration: stored selection state is not valid JSON", err);
+          toast("Could not read the saved filters.");
+          return;
+        }
+        if (!sels || !sels.length) { toast("This comment has no filters saved."); return; }
+        applySelections(sels);
       });
 
       // ---------- real-time (SignalR) with polling fallback ----------
@@ -1054,6 +1144,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
     beforeDestroy: function () {
       if (this._timer) clearInterval(this._timer);
+      if (this._selTimer) clearInterval(this._selTimer);
       if (this._stopPicking) this._stopPicking();
       if (this._stopRecording) this._stopRecording();
       if (this._connection) {
