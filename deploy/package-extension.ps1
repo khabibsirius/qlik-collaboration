@@ -18,7 +18,8 @@ $ErrorActionPreference = 'Stop'
 $source = Resolve-Path (Join-Path $PSScriptRoot "..\extension\qlik-collaboration")
 $qext   = Join-Path $source "qlik-collaboration.qext"
 
-if (-not (Test-Path $qext)) { throw "Not an extension folder (no .qext): $source" }
+# Never ship a package Qlik cannot register.
+& (Join-Path $PSScriptRoot "Test-Extension.ps1") -ExtensionPath $source
 
 $version = (Get-Content $qext -Raw | ConvertFrom-Json).version
 New-Item -ItemType Directory -Force $OutputDir | Out-Null
