@@ -22,7 +22,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.6.0";
+  var EXT_VERSION = "0.6.1";
 
   function esc(text) {
     return String(text)
@@ -144,15 +144,33 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
     support: { snapshot: false, export: false, exportData: false },
 
+    // Qlik re-paints on every selection change, resize and property edit. The
+    // classic (Desktop) client tolerates a paint that throws; the Enterprise
+    // micro-frontend client replaces the object with an error placeholder — so
+    // one bad repaint must never escape, or the whole panel dies on the server.
     paint: function ($element, layout) {
+      try {
+        return this._paint($element, layout);
+      } catch (err) {
+        console.error("qlik-collaboration v" + EXT_VERSION + ": paint failed", err);
+        return qlik.Promise.resolve();
+      }
+    },
+
+    _paint: function ($element, layout) {
       var self = this;
       var app = qlik.currApp(this);
       var apiUrl = (layout.collab && layout.collab.apiUrl) || "http://localhost:5000";
       var pollMs = ((layout.collab && layout.collab.pollSeconds) || 3) * 1000;
+      var identityMode = (layout.collab && layout.collab.identityMode) || "auto";
 
       // Build the UI once; later paints only re-apply changed settings.
       // (Qlik re-paints on resize and after every property-panel edit, so this
       // path must honour setting changes — not silently ignore them.)
+      // NB: this branch runs on EVERY selection change. Up to v0.6.0 it read an
+      // undeclared variable and threw a ReferenceError here, which the
+      // Enterprise client answered by tearing the panel down (Desktop shrugged
+      // it off) — the "works on Desktop, broken on Enterprise" bug.
       if (self._built) {
         self._apiUrl = apiUrl;
         self._applyMethod = (layout.collab && layout.collab.applyMethod) || "auto";
@@ -249,7 +267,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       //   manual — typed name (development only)
       // kept on `self` (not a closure var) so a property-panel change during a
       // later paint is picked up by the resolver below
-      self._identityMode = (layout.collab && layout.collab.identityMode) || "auto";
+      self._identityMode = identityMode;
       self._applyMethod = (layout.collab && layout.collab.applyMethod) || "auto";
       self._authorDirectory = null;
 
@@ -1373,16 +1391,24 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           // Resolving is not the same as selecting. selectValues(["6/1/2023"]) on a
           // date field resolves happily and matches nothing, so check the state
           // afterwards and keep going instead of declaring victory.
+          // The selection state arrives asynchronously, and on Enterprise it
+          // crosses the proxy — one early check misreads "not here yet" as
+          // "selected nothing", so poll a few times before giving up on a method.
           function settled() {
-            setTimeout(function () {
-              if (fieldHasSelection(fieldName)) {
-                console.log("qlik-collaboration: applied via '" + a.name + "'");
-                onDone(null, a.name);
-              } else {
-                console.warn("qlik-collaboration: '" + a.name + "' resolved but selected nothing in '" + fieldName + "' - trying the next method");
-                next(new Error("'" + a.name + "' selected nothing"));
-              }
-            }, 350);
+            var checksLeft = 4;                       // 350ms apart ≈ 1.4s total
+            (function check() {
+              setTimeout(function () {
+                if (fieldHasSelection(fieldName)) {
+                  console.log("qlik-collaboration: applied via '" + a.name + "'");
+                  onDone(null, a.name);
+                } else if (--checksLeft > 0) {
+                  check();
+                } else {
+                  console.warn("qlik-collaboration: '" + a.name + "' resolved but selected nothing in '" + fieldName + "' - trying the next method");
+                  next(new Error("'" + a.name + "' selected nothing"));
+                }
+              }, 350);
+            })();
           }
 
           var r;
@@ -1431,23 +1457,30 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       // A method can report success and still select nothing. Read the selection
       // state back and say so, instead of claiming the filters were applied.
+      // Same latency caveat as in runAttempts: on Enterprise the state can take
+      // well over a second to come back, so re-check before crying failure.
       function verifyApplied(sels, used) {
-        setTimeout(function () {
-          var now = snapshotSelections();
-          var missing = sels.filter(function (s) {
-            return !now.some(function (n) {
-              return n.field === s.field && n.values && n.values.length;
-            });
-          }).map(function (s) { return s.field; });
+        var checksLeft = 3;                            // 800ms apart ≈ 2.4s total
+        (function check() {
+          setTimeout(function () {
+            var now = snapshotSelections();
+            var missing = sels.filter(function (s) {
+              return !now.some(function (n) {
+                return n.field === s.field && n.values && n.values.length;
+              });
+            }).map(function (s) { return s.field; });
 
-          if (missing.length) {
-            console.warn("qlik-collaboration: '" + used + "' reported success but nothing was selected in:", missing);
-            toast("'" + used + "' selected nothing in " + missing.join(", ") +
-                  " - try another Apply filters method in the settings");
-          } else {
-            toast("Filters applied" + (used ? " (" + used + ")" : ""));
-          }
-        }, 800);
+            if (!missing.length) {
+              toast("Filters applied" + (used ? " (" + used + ")" : ""));
+            } else if (--checksLeft > 0) {
+              check();
+            } else {
+              console.warn("qlik-collaboration: '" + used + "' reported success but nothing was selected in:", missing);
+              toast("'" + used + "' selected nothing in " + missing.join(", ") +
+                    " - try another Apply filters method in the settings");
+            }
+          }, 800);
+        })();
       }
 
       function applySelections(sels) {
@@ -1478,9 +1511,6 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             if (!s.field || !selectionItems(s).length) { step(s.field); return; }
             runAttempts(selectAttempts(s), s.field, function (err, method) { step(s.field, err, method); });
           });
-        }, function (err) {
-          console.error("qlik-collaboration: clearAll failed", err);
-          toast("Could not clear the current selections.");
         });
       }
 
