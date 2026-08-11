@@ -22,7 +22,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.5.2";
+  var EXT_VERSION = "0.6.0";
 
   function esc(text) {
     return String(text)
@@ -117,8 +117,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
                     { value: "waitfor-objects", label: "5. wait for field, then selectValues" },
                     { value: "objects-nosoftlock", label: "6. selectValues without soft lock" },
                     { value: "engine-selectvalues", label: "7. Engine API selectValues" },
-                    { value: "engine-select-match", label: "8. Engine API select (search match)" },
-                    { value: "selectmatch", label: "9. selectMatch (single value)" }
+                    { value: "engine-select-match", label: "8. Engine API select - search match (best for dates)" },
+                    { value: "selectmatch-search", label: "9. selectMatch - search match" },
+                    { value: "selectmatch", label: "10. selectMatch (single value)" }
                   ],
                   defaultValue: "auto"
                 },
@@ -1299,14 +1300,25 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             });
           });
         },
-        // 8 - Engine API search-match, e.g. ("1186"|"1187")
+        // 8 - Engine API search-match, e.g. ("6/1/2023"|"9/4/2023").
+        // This is the one that handles DUAL fields — dates especially. A date is
+        // text plus a numeric serial, and selectionState only ever gives us the
+        // text, so a value-based select can match nothing. A search matches on the
+        // formatted text, which is exactly what we captured.
         "engine-select-match": function (s) {
-          var expr = valueTexts(s).map(function (t) {
+          var expr = "(" + valueTexts(s).map(function (t) {
             return '"' + String(t).replace(/"/g, '""') + '"';
-          }).join("|");
+          }).join("|") + ")";
           return enigmaDoc().getField(s.field, s.state || "$").then(function (f) {
             return f.select(expr, true, 0);
           });
+        },
+        // 9 - Capability search-match, same idea without the Engine API
+        "selectmatch-search": function (s) {
+          var expr = "(" + valueTexts(s).map(function (t) {
+            return '"' + String(t).replace(/"/g, '""') + '"';
+          }).join("|") + ")";
+          return fieldFor(s).selectMatch(expr, true);
         },
         // 9 - Capability selectMatch (one value at a time)
         "selectmatch": function (s) {
@@ -1322,7 +1334,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         "plain-texts-state", "plain-texts", "plain-numbers",
         "objects", "text-objects",
         "waitfor-objects", "objects-nosoftlock",
-        "engine-selectvalues", "engine-select-match", "selectmatch"
+        "engine-selectvalues",
+        // search-based, and the ones that work for dual fields such as dates
+        "engine-select-match", "selectmatch-search", "selectmatch"
       ];
 
       function selectAttempts(s) {
@@ -1341,11 +1355,36 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
                     });
       }
 
-      function runAttempts(attempts, onDone) {
+      // Did this field actually end up selected?
+      function fieldHasSelection(fieldName) {
+        var now = snapshotSelections();
+        for (var i = 0; i < now.length; i++) {
+          if (now[i].field === fieldName && now[i].values && now[i].values.length) return true;
+        }
+        return false;
+      }
+
+      function runAttempts(attempts, fieldName, onDone) {
         var i = 0;
         (function next(lastErr) {
-          if (i >= attempts.length) { onDone(lastErr || new Error("no method worked"), null); return; }
+          if (i >= attempts.length) { onDone(lastErr || new Error("no method selected anything"), null); return; }
           var a = attempts[i++];
+
+          // Resolving is not the same as selecting. selectValues(["6/1/2023"]) on a
+          // date field resolves happily and matches nothing, so check the state
+          // afterwards and keep going instead of declaring victory.
+          function settled() {
+            setTimeout(function () {
+              if (fieldHasSelection(fieldName)) {
+                console.log("qlik-collaboration: applied via '" + a.name + "'");
+                onDone(null, a.name);
+              } else {
+                console.warn("qlik-collaboration: '" + a.name + "' resolved but selected nothing in '" + fieldName + "' - trying the next method");
+                next(new Error("'" + a.name + "' selected nothing"));
+              }
+            }, 350);
+          }
+
           var r;
           try {
             console.log("qlik-collaboration v" + EXT_VERSION + ": trying '" + a.name + "'", a.preview);
@@ -1356,11 +1395,12 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             return;
           }
           if (r && typeof r.then === "function") {
-            r.then(function () { console.log("qlik-collaboration: applied via '" + a.name + "'"); onDone(null, a.name); },
-                   function (err) { console.warn("qlik-collaboration: method '" + a.name + "' rejected", err); next(err); });
+            r.then(settled, function (err) {
+              console.warn("qlik-collaboration: method '" + a.name + "' rejected", err);
+              next(err);
+            });
           } else {
-            console.log("qlik-collaboration: applied via '" + a.name + "' (returned no promise)");
-            onDone(null, a.name);
+            settled();
           }
         })();
       }
@@ -1436,7 +1476,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         clearAllThen(function () {
           sels.forEach(function (s) {
             if (!s.field || !selectionItems(s).length) { step(s.field); return; }
-            runAttempts(selectAttempts(s), function (err, method) { step(s.field, err, method); });
+            runAttempts(selectAttempts(s), s.field, function (err, method) { step(s.field, err, method); });
           });
         }, function (err) {
           console.error("qlik-collaboration: clearAll failed", err);
