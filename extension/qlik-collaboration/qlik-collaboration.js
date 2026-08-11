@@ -98,6 +98,25 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
                   type: "number",
                   defaultValue: 3
                 },
+                applyMethod: {
+                  ref: "collab.applyMethod",
+                  label: "Apply filters method",
+                  type: "string",
+                  component: "dropdown",
+                  options: [
+                    { value: "auto", label: "Auto - try every method in order" },
+                    { value: "objects", label: "1. selectValues [{qText,qNumber}]" },
+                    { value: "text-objects", label: "2. selectValues [{qText}] (no number)" },
+                    { value: "plain-texts", label: "3. selectValues ['text']" },
+                    { value: "plain-numbers", label: "4. selectValues [number]" },
+                    { value: "waitfor-objects", label: "5. wait for field, then selectValues" },
+                    { value: "objects-nosoftlock", label: "6. selectValues without soft lock" },
+                    { value: "engine-selectvalues", label: "7. Engine API selectValues" },
+                    { value: "engine-select-match", label: "8. Engine API select (search match)" },
+                    { value: "selectmatch", label: "9. selectMatch (single value)" }
+                  ],
+                  defaultValue: "auto"
+                },
                 identityMode: {
                   ref: "collab.identityMode",
                   label: "User identity",
@@ -130,6 +149,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // path must honour setting changes — not silently ignore them.)
       if (self._built) {
         self._apiUrl = apiUrl;
+        self._applyMethod = (layout.collab && layout.collab.applyMethod) || "auto";
         if (self._identityMode !== identityMode) {
           self._identityMode = identityMode;
           self._applyIdentityMode();
@@ -222,6 +242,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // kept on `self` (not a closure var) so a property-panel change during a
       // later paint is picked up by the resolver below
       self._identityMode = (layout.collab && layout.collab.identityMode) || "auto";
+      self._applyMethod = (layout.collab && layout.collab.applyMethod) || "auto";
       self._authorDirectory = null;
 
       function showManualIdentity() {
@@ -1189,74 +1210,182 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           : self._app.field(s.field);
       }
 
-      // Qlik has accepted different argument shapes for selectValues across
-      // versions, so try them in order and stop at the first that works. Which one
-      // succeeded is logged, so a future breakage is one console line to diagnose.
-      function selectAttempts(s) {
+      // ---------- apply-filters strategies ----------
+      // The Capability API is a compatibility layer, and the micro-frontend client
+      // used by recent Enterprise releases reimplements it — argument shapes the
+      // older Desktop client accepted can throw inside Qlik's own bundle there.
+      // So every documented way of making a selection is available here, selectable
+      // from the properties panel ("Apply filters method"). "auto" tries them in
+      // order and reports which one worked.
+
+      function valueTexts(s) {
+        return selectionItems(s).map(function (o) { return o.qText; });
+      }
+      function valueNumbers(s) {
         var objs = selectionItems(s);
-        var texts = objs.map(function (o) { return o.qText; });
-        return [
-          { name: "field.selectValues(objects)",
-            run: function () { return fieldFor(s).selectValues(objs, false, true); } },
-          { name: "field.selectValues(texts)",
-            run: function () { return fieldFor(s).selectValues(texts, false, true); } },
-          { name: "engine.getField().selectValues()",
-            run: function () {
-              var doc = self._app.model && self._app.model.enigmaModel;
-              if (!doc || typeof doc.getField !== "function") throw new Error("no enigma model");
-              return doc.getField(s.field, s.state || "$").then(function (f) {
-                return f.selectValues({ qFieldValues: objs, qToggleMode: false, qSoftLock: true });
-              });
-            } },
-          { name: "field.selectMatch(single value)",
-            run: function () {
-              if (texts.length !== 1) throw new Error("selectMatch handles one value only");
-              return fieldFor(s).selectMatch(texts[0], true);
-            } }
-        ];
+        var nums = [];
+        for (var i = 0; i < objs.length; i++) {
+          var n = (typeof objs[i].qNumber === "number") ? objs[i].qNumber : Number(objs[i].qText);
+          if (!isFinite(n) || objs[i].qText === "") return null;   // not a numeric field
+          nums.push(n);
+        }
+        return nums;
+      }
+      function enigmaDoc() {
+        var doc = self._app.model && self._app.model.enigmaModel;
+        if (!doc || typeof doc.getField !== "function") throw new Error("enigma model unavailable");
+        return doc;
+      }
+
+      var APPLY_METHODS = {
+        // 1 - what worked on Desktop: [{qText}] (+qNumber for numeric values)
+        "objects": function (s) {
+          return fieldFor(s).selectValues(selectionItems(s), false, true);
+        },
+        // 2 - same, without soft lock (some builds reject softlock on published apps)
+        "objects-nosoftlock": function (s) {
+          return fieldFor(s).selectValues(selectionItems(s), false, false);
+        },
+        // 3 - text only, no qNumber (a wrong qNumber can match nothing)
+        "text-objects": function (s) {
+          return fieldFor(s).selectValues(
+            valueTexts(s).map(function (t) { return { qText: t }; }), false, true);
+        },
+        // 4 - plain strings instead of objects
+        "plain-texts": function (s) {
+          return fieldFor(s).selectValues(valueTexts(s), false, true);
+        },
+        // 5 - plain numbers (numeric fields only)
+        "plain-numbers": function (s) {
+          var nums = valueNumbers(s);
+          if (!nums) throw new Error("values are not numeric");
+          return fieldFor(s).selectValues(nums, false, true);
+        },
+        // 6 - wait for the field model before selecting (fixes "not ready yet")
+        "waitfor-objects": function (s) {
+          var f = fieldFor(s);
+          var ready = f.waitFor && typeof f.waitFor.then === "function"
+            ? f.waitFor : { then: function (cb) { return cb(); } };
+          return ready.then(function () {
+            return f.selectValues(selectionItems(s), false, true);
+          });
+        },
+        // 7 - Engine API directly, bypassing the Capability layer entirely
+        "engine-selectvalues": function (s) {
+          return enigmaDoc().getField(s.field, s.state || "$").then(function (f) {
+            return f.selectValues({
+              qFieldValues: selectionItems(s).map(function (o) {
+                return (typeof o.qNumber === "number")
+                  ? { qText: o.qText, qIsNumeric: true, qNumber: o.qNumber }
+                  : { qText: o.qText, qIsNumeric: false, qNumber: 0 };
+              }),
+              qToggleMode: false,
+              qSoftLock: true
+            });
+          });
+        },
+        // 8 - Engine API search-match, e.g. ("1186"|"1187")
+        "engine-select-match": function (s) {
+          var expr = valueTexts(s).map(function (t) {
+            return '"' + String(t).replace(/"/g, '""') + '"';
+          }).join("|");
+          return enigmaDoc().getField(s.field, s.state || "$").then(function (f) {
+            return f.select(expr, true, 0);
+          });
+        },
+        // 9 - Capability selectMatch (one value at a time)
+        "selectmatch": function (s) {
+          var texts = valueTexts(s);
+          if (texts.length !== 1) throw new Error("selectMatch handles a single value only");
+          return fieldFor(s).selectMatch(texts[0], true);
+        }
+      };
+
+      // order used by "auto": cheapest and most standard first
+      var APPLY_ORDER = [
+        "objects", "text-objects", "plain-texts", "plain-numbers",
+        "waitfor-objects", "objects-nosoftlock",
+        "engine-selectvalues", "engine-select-match", "selectmatch"
+      ];
+
+      function selectAttempts(s) {
+        // read from self, not the captured layout: the setting can change on a re-paint
+        var chosen = self._applyMethod || "auto";
+        var names = (chosen === "auto") ? APPLY_ORDER : [chosen];
+        return names.filter(function (n) { return APPLY_METHODS[n]; })
+                    .map(function (n) {
+                      return { name: n, run: function () { return APPLY_METHODS[n](s); } };
+                    });
       }
 
       function runAttempts(attempts, onDone) {
         var i = 0;
         (function next(lastErr) {
-          if (i >= attempts.length) { onDone(lastErr || new Error("no method worked")); return; }
+          if (i >= attempts.length) { onDone(lastErr || new Error("no method worked"), null); return; }
           var a = attempts[i++];
           var r;
           try {
             r = a.run();
           } catch (err) {
-            console.warn("qlik-collaboration: " + a.name + " threw", err);
+            console.warn("qlik-collaboration: method '" + a.name + "' threw", err);
             next(err);
             return;
           }
           if (r && typeof r.then === "function") {
-            r.then(function () { console.log("qlik-collaboration: applied via " + a.name); onDone(null); },
-                   function (err) { console.warn("qlik-collaboration: " + a.name + " rejected", err); next(err); });
+            r.then(function () { console.log("qlik-collaboration: applied via '" + a.name + "'"); onDone(null, a.name); },
+                   function (err) { console.warn("qlik-collaboration: method '" + a.name + "' rejected", err); next(err); });
           } else {
-            console.log("qlik-collaboration: applied via " + a.name);
-            onDone(null);
+            console.log("qlik-collaboration: applied via '" + a.name + "' (returned no promise)");
+            onDone(null, a.name);
           }
         })();
+      }
+
+      // A method can report success and still select nothing. Read the selection
+      // state back and say so, instead of claiming the filters were applied.
+      function verifyApplied(sels, used) {
+        setTimeout(function () {
+          var now = snapshotSelections();
+          var missing = sels.filter(function (s) {
+            return !now.some(function (n) {
+              return n.field === s.field && n.values && n.values.length;
+            });
+          }).map(function (s) { return s.field; });
+
+          if (missing.length) {
+            console.warn("qlik-collaboration: '" + used + "' reported success but nothing was selected in:", missing);
+            toast("'" + used + "' selected nothing in " + missing.join(", ") +
+                  " - try another Apply filters method in the settings");
+          } else {
+            toast("Filters applied" + (used ? " (" + used + ")" : ""));
+          }
+        }, 800);
       }
 
       function applySelections(sels) {
         var pending = sels.length;
         var failed = [];
+        var used = null;
 
-        function step(field, err) {
+        function step(field, err, method) {
           if (err) {
             console.error("qlik-collaboration: could not select in field '" + field + "'", err);
             failed.push(field);
+          } else if (method) {
+            used = method;
           }
           if (--pending > 0) return;
-          if (failed.length) toast("Could not apply: " + failed.join(", "));
-          else toast("Filters applied.");
+          if (failed.length) {
+            toast("Could not apply: " + failed.join(", ") + " - see the console, then try another Apply filters method");
+          } else {
+            verifyApplied(sels, used);
+          }
         }
 
         self._app.clearAll().then(function () {
           sels.forEach(function (s) {
             if (!s.field || !selectionItems(s).length) { step(s.field); return; }
-            runAttempts(selectAttempts(s), function (err) { step(s.field, err); });
+            runAttempts(selectAttempts(s), function (err, method) { step(s.field, err, method); });
           });
         }, function (err) {
           console.error("qlik-collaboration: clearAll failed", err);
