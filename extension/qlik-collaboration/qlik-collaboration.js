@@ -20,6 +20,10 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // ---------- helpers ----------
 
+  // Shown in the panel header and logged at startup, so it is always obvious which
+  // build is actually running — browser and server caches make that easy to get wrong.
+  var EXT_VERSION = "0.5.2";
+
   function esc(text) {
     return String(text)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -163,6 +167,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         return qlik.Promise.resolve();
       }
       self._built = true;
+      console.log("qlik-collaboration v" + EXT_VERSION + " loaded");
       self._apiUrl = apiUrl;
       self._app = app;
       self._replyTo = null;
@@ -181,7 +186,8 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       $element.html(
         '<div class="qcol-panel">' +
         '  <div class="qcol-header">' +
-        '    <span class="qcol-title">Comments <span class="qcol-count"></span></span>' +
+        '    <span class="qcol-title" title="Qlik Collaboration v' + EXT_VERSION + '">Comments ' +
+        '<span class="qcol-count"></span> <span class="qcol-ver">v' + EXT_VERSION + '</span></span>' +
         '    <span class="qcol-headright">' +
         '      <span class="qcol-bell" title="Notifications">🔔<span class="qcol-badge" style="display:none"></span></span>' +
         '      <span class="qcol-conn" title="Backend connection">●</span>' +
@@ -1325,7 +1331,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         var names = (chosen === "auto") ? APPLY_ORDER : [chosen];
         return names.filter(function (n) { return APPLY_METHODS[n]; })
                     .map(function (n) {
-                      return { name: n, run: function () { return APPLY_METHODS[n](s); } };
+                      return {
+                        name: n,
+                        // logged before the call, so the console shows exactly what
+                        // is being handed to Qlik
+                        preview: { field: s.field, state: s.state || "$", values: valueTexts(s) },
+                        run: function () { return APPLY_METHODS[n](s); }
+                      };
                     });
       }
 
@@ -1336,6 +1348,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           var a = attempts[i++];
           var r;
           try {
+            console.log("qlik-collaboration v" + EXT_VERSION + ": trying '" + a.name + "'", a.preview);
             r = a.run();
           } catch (err) {
             console.warn("qlik-collaboration: method '" + a.name + "' threw", err);
@@ -1350,6 +1363,30 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             onDone(null, a.name);
           }
         })();
+      }
+
+      // Clear current selections, then continue NO MATTER WHAT: rejected, thrown,
+      // or never settled. A hanging clearAll is indistinguishable from "the button
+      // does nothing", which is exactly how this failed before.
+      function clearAllThen(next) {
+        var moved = false;
+        function go(why) {
+          if (moved) return;
+          moved = true;
+          if (why) console.warn("qlik-collaboration: continuing without a clean clearAll -", why);
+          next();
+        }
+        try {
+          var p = self._app.clearAll();
+          if (p && typeof p.then === "function") {
+            p.then(function () { go(); }, function (err) { go(err || "clearAll rejected"); });
+          } else {
+            go();
+          }
+        } catch (err) {
+          go(err);
+        }
+        setTimeout(function () { go("clearAll did not settle within 1.5s"); }, 1500);
       }
 
       // A method can report success and still select nothing. Read the selection
@@ -1393,7 +1430,10 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           }
         }
 
-        self._app.clearAll().then(function () {
+        // Clearing must never block the selection. A clearAll() that rejects -- or
+        // never settles, which is silent and looks exactly like "nothing happened" --
+        // used to swallow the whole operation because the selects ran in its .then().
+        clearAllThen(function () {
           sels.forEach(function (s) {
             if (!s.field || !selectionItems(s).length) { step(s.field); return; }
             runAttempts(selectAttempts(s), function (err, method) { step(s.field, err, method); });

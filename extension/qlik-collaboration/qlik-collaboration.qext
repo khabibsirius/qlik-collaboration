@@ -2,7 +2,7 @@
   "name": "Qlik Collaboration",
   "description": "Comments and discussion panel for Qlik Sense sheets. Supports replies, statuses, and selection-context capture.",
   "type": "visualization",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "icon": "extension",
   "author": "BI Team",
   "preview": "",
