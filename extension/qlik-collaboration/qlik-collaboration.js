@@ -516,7 +516,12 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           });
         });
       }
-      loadCells().catch(function () { /* edit mode / no sheet — picker stays sheet-only */ });
+      // Chart names in the "attached to" tooltip come from this list, so re-render
+      // once it arrives — the first render usually happens before it resolves.
+      loadCells().then(function () {
+        self._lastPayload = "";
+        refresh();
+      }).catch(function () { /* edit mode / no sheet — picker stays sheet-only */ });
       renderChips();
 
       $element.on("change", ".qcol-attach", function () {
@@ -614,6 +619,58 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           unmarkPicked(hit.id);
         }
       }
+
+      // ---------- show which charts a comment is attached to ----------
+      // The reverse of the picker: given an object id, find its element on the
+      // sheet. Qlik puts the id in an attribute of the cell container; which
+      // attribute varies by version, so try the known ones and then fall back to
+      // scanning, exactly as the picker does in the other direction.
+      function findElementForObject(objId) {
+        var direct = ['[tid="' + objId + '"]', '[data-qid="' + objId + '"]', '[data-id="' + objId + '"]'];
+        for (var i = 0; i < direct.length; i++) {
+          try {
+            var hit = document.querySelector(direct[i]);
+            if (hit && !$element[0].contains(hit)) return hit;
+          } catch (e) { /* invalid selector for this id - ignore */ }
+        }
+        var all = document.querySelectorAll("div,section,article");
+        for (var j = 0; j < all.length; j++) {
+          var node = all[j];
+          if ($element[0].contains(node)) continue;      // never match the panel itself
+          var attrs = node.attributes;
+          for (var k = 0; k < attrs.length; k++) {
+            if (attrs[k].value && attrs[k].value.indexOf(objId) !== -1) return node;
+          }
+        }
+        return null;
+      }
+
+      function showAttachedObjects(ids) {
+        var found = [];
+        ids.forEach(function (id) {
+          var el = findElementForObject(id);
+          if (!el) return;
+          found.push(el);
+          el.classList.add("qcol-pick-highlight");
+          setTimeout(function () { el.classList.remove("qcol-pick-highlight"); }, 3000);
+        });
+
+        if (!found.length) {
+          toast("Those charts are not on this sheet any more.");
+          return;
+        }
+        try { found[0].scrollIntoView({ block: "nearest" }); } catch (e) { /* older client */ }
+        toast(found.length === ids.length
+          ? (ids.length > 1 ? "Highlighted " + ids.length + " charts" : "Highlighted the chart")
+          : "Highlighted " + found.length + " of " + ids.length + " charts (the rest are gone)");
+      }
+
+      $element.on("click", ".qcol-objtag", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var ids = ($(this).attr("data-objs") || "").split(",").filter(Boolean);
+        if (ids.length) showAttachedObjects(ids);
+      });
 
       $element.on("click", ".qcol-pick", function (e) {
         e.preventDefault();
@@ -945,7 +1002,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             h += '<span class="qcol-status qcol-status-' + esc(c.status) + '" data-id="' + c.id + '" title="Click to change status">' + (STATUS_LABELS[c.status] || c.status) + "</span>";
           }
           if (c.objectIds && c.objectIds.length) {
-            h += '<span class="qcol-objtag" title="Attached to: ' + esc(c.objectIds.map(objLabel).join(", ")) + '">📊' +
+            h += '<span class="qcol-objtag" data-objs="' + esc(c.objectIds.join(",")) + '"' +
+                 ' title="Attached to: ' + esc(c.objectIds.map(objLabel).join(", ")) +
+                 '\nClick to highlight these charts on the sheet">📊' +
                  (c.objectIds.length > 1 ? "×" + c.objectIds.length : "") + "</span>";
           }
           h += "</div>";

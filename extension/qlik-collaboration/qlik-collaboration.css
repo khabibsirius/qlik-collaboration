@@ -320,7 +320,15 @@
 .qcol-status-fixed       { background: #e6f6ec; color: #1e7e40; }
 .qcol-status-closed      { background: #f1f3f5; color: #7b8794; }
 
-.qcol-objtag { cursor: help; font-size: 11px; color: var(--qcol-muted); }
+.qcol-objtag {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--qcol-muted);
+  border-radius: 10px;
+  padding: 0 5px;
+  transition: background .12s, color .12s;
+}
+.qcol-objtag:hover { background: #e6f6ec; color: #1e7e40; }
 
 .qcol-body {
   white-space: pre-wrap;
