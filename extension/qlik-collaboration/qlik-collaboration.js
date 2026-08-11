@@ -105,6 +105,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
                   component: "dropdown",
                   options: [
                     { value: "auto", label: "Auto - try every method in order" },
+                    { value: "plain-texts-state", label: "0. selectValues ['text'] + state (works on Enterprise)" },
                     { value: "objects", label: "1. selectValues [{qText,qNumber}]" },
                     { value: "text-objects", label: "2. selectValues [{qText}] (no number)" },
                     { value: "plain-texts", label: "3. selectValues ['text']" },
@@ -1238,6 +1239,14 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
 
       var APPLY_METHODS = {
+        // 0 - PROVEN on the Enterprise micro-frontend client: plain values, and the
+        // state passed explicitly. That client's selectValues iterates the argument
+        // directly, so [{qText:...}] objects make it throw "e.forEach is not a
+        // function"; ["1186"] is what it accepts.
+        "plain-texts-state": function (s) {
+          return self._app.field(s.field, s.state || "$")
+                          .selectValues(valueTexts(s), false, true);
+        },
         // 1 - what worked on Desktop: [{qText}] (+qNumber for numeric values)
         "objects": function (s) {
           return fieldFor(s).selectValues(selectionItems(s), false, true);
@@ -1301,9 +1310,11 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         }
       };
 
-      // order used by "auto": cheapest and most standard first
+      // Order used by "auto": the shapes proven to work come first, so the common
+      // case succeeds on the first try instead of throwing its way down the list.
       var APPLY_ORDER = [
-        "objects", "text-objects", "plain-texts", "plain-numbers",
+        "plain-texts-state", "plain-texts", "plain-numbers",
+        "objects", "text-objects",
         "waitfor-objects", "objects-nosoftlock",
         "engine-selectvalues", "engine-select-match", "selectmatch"
       ];
