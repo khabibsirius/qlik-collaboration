@@ -181,6 +181,24 @@
   line-height: 21px;
 }
 .qcol-nosel { color: var(--qcol-faint); font-size: 11.5px; }
+.qcol-selections { cursor: pointer; }
+
+/* diagnostic dump of what Qlik reports (click the selections strip) */
+.qcol-debug {
+  margin: 0;
+  padding: 8px 12px;
+  max-height: 220px;
+  overflow: auto;
+  background: #1f2937;
+  color: #d1fae5;
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.qcol-chip-range { background: #fef3e2; color: #b26a00; }
 
 .qcol-chip {
   display: inline-block;

@@ -170,7 +170,8 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '    <div class="qcol-notifs-head">Notifications <a href="#" class="qcol-markread">mark all read</a></div>' +
         '    <div class="qcol-notifs-list"></div>' +
         '  </div>' +
-        '  <div class="qcol-selections" title="Current selections (captured with your comment)"></div>' +
+        '  <div class="qcol-selections" title="Current selections (captured with your comment) - click to show what Qlik reports"></div>' +
+        '  <pre class="qcol-debug" style="display:none"></pre>' +
         '  <div class="qcol-list"></div>' +
         '  <div class="qcol-toast" style="display:none"></div>' +
         '  <div class="qcol-compose">' +
@@ -341,9 +342,35 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       applyIdentityMode();
 
       // ---------- selection tracking (Capability API) ----------
-      self._selState = app.selectionState();
+      // Selections live per STATE. Objects using an alternate state put their
+      // selections in that state, not in the default "$" — reading only "$" is why
+      // filters from some charts were captured and from others were not.
+      self._selStates = {};                       // stateName -> selectionState object
+      self._selState = app.selectionState();      // default state
+      self._selStates["$"] = self._selState;
       self._currentSelections = [];
       self._selSignature = "";
+
+      function trackState(name) {
+        if (!name || self._selStates[name]) return;
+        try {
+          var st = app.selectionState(name);
+          self._selStates[name] = st;
+          try { st.OnData.bind(onSel); } catch (e) { /* the poll covers it */ }
+        } catch (e) {
+          console.warn("qlik-collaboration: cannot track alternate state '" + name + "'", e);
+        }
+      }
+
+      // discover alternate states defined in the app
+      try {
+        app.getAppLayout(function (layout) {
+          var names = (layout && layout.qLayout && layout.qLayout.qStateNames) ||
+                      (layout && layout.qStateNames) || [];
+          names.forEach(trackState);
+          if (names.length) console.log("qlik-collaboration: alternate states:", names);
+        });
+      } catch (e) { /* no alternate states available */ }
 
       // A selected value may be numeric (Year, amounts, dates). Selecting such a
       // field back by its TEXT alone silently matches nothing, so keep the number
@@ -357,30 +384,76 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
 
       function snapshotSelections() {
-        return ((self._selState && self._selState.selections) || []).map(function (s) {
-          var vals = s.selectedValues || [];
-          return {
-            field: s.fieldName || s.field,
-            // plain strings: what the chips show, and the format older comments stored
-            values: vals.map(function (v) { return v.qName; }),
-            // text + number pairs, used when re-applying
-            raw: vals.map(function (v) {
-              var num = numericOf(v);
-              return num === null ? { text: v.qName } : { text: v.qName, number: num };
-            }),
-            total: s.selectedCount
-          };
+        var out = [];
+        Object.keys(self._selStates).forEach(function (stateName) {
+          var st = self._selStates[stateName];
+          ((st && st.selections) || []).forEach(function (s) {
+            var vals = s.selectedValues || [];
+            var entry = {
+              field: s.fieldName || s.field,
+              // plain strings: what the chips show, and the format older comments stored
+              values: vals.map(function (v) { return v.qName; }),
+              // text + number pairs, used when re-applying
+              raw: vals.map(function (v) {
+                var num = numericOf(v);
+                return num === null ? { text: v.qName } : { text: v.qName, number: num };
+              }),
+              total: s.selectedCount
+            };
+            if (stateName !== "$") entry.state = stateName;
+            // A range selection (dragging an axis, a date range) reports a count but
+            // no discrete values, so there is nothing to store or replay. Flag it so
+            // the panel can say so instead of silently attaching an empty filter.
+            if (!vals.length && s.selectedCount) entry.unsupportedRange = true;
+            out.push(entry);
+          });
         });
+        return out;
       }
 
       function renderSelections(sels) {
         var $box = $element.find(".qcol-selections");
-        if (!sels.length) { $box.html('<span class="qcol-nosel">No selections</span>'); return; }
-        $box.html(sels.map(function (s) {
-          var vals = s.values.slice(0, 5).join(", ") + (s.total > s.values.length ? " …" : "");
-          return '<span class="qcol-chip">' + esc(s.field) + ": " + esc(vals) + "</span>";
-        }).join(" "));
+        if (!sels.length) {
+          $box.html('<span class="qcol-nosel">No selections</span>');
+        } else {
+          $box.html(sels.map(function (s) {
+            if (s.unsupportedRange) {
+              return '<span class="qcol-chip qcol-chip-range" title="Qlik reports a range selection here, which has no individual values to save or replay. Select the values instead (e.g. in a filter pane) to attach them.">' +
+                     esc(s.field) + ": range (cannot be saved)</span>";
+            }
+            var vals = s.values.slice(0, 5).join(", ") + (s.total > s.values.length ? " …" : "");
+            var label = (s.state ? "[" + s.state + "] " : "") + s.field;
+            return '<span class="qcol-chip">' + esc(label) + ": " + esc(vals) + "</span>";
+          }).join(" "));
+        }
+        if (self._debug) renderDebug(sels);
       }
+
+      // Click the selections strip to show exactly what Qlik reports — the fastest
+      // way to see why a particular chart's filters are not being captured.
+      function renderDebug(sels) {
+        var lines = ["states tracked: " + Object.keys(self._selStates).join(", ")];
+        Object.keys(self._selStates).forEach(function (name) {
+          var raw = (self._selStates[name] || {}).selections || [];
+          lines.push("--- state " + name + ": " + raw.length + " selection(s) ---");
+          raw.forEach(function (s) {
+            lines.push(JSON.stringify({
+              field: s.fieldName || s.field,
+              selectedCount: s.selectedCount,
+              selectedValues: (s.selectedValues || []).slice(0, 5)
+            }));
+          });
+        });
+        lines.push("--- captured for the next comment ---");
+        lines.push(JSON.stringify(sels, null, 1));
+        $element.find(".qcol-debug").text(lines.join("\n")).show();
+      }
+
+      $element.on("click", ".qcol-selections", function () {
+        self._debug = !self._debug;
+        if (self._debug) { renderDebug(self._currentSelections); }
+        else { $element.find(".qcol-debug").hide(); }
+      });
 
       function onSel() {
         var sels = snapshotSelections();
@@ -950,7 +1023,16 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         $author.removeClass("qcol-invalid");
         stopRecording();
 
-        var withSel = $element.find(".qcol-selcheck").prop("checked") && self._currentSelections.length > 0;
+        // Only selections with discrete values can be replayed; a range selection
+        // carries nothing to store. Say so rather than attaching an empty filter.
+        var wantSel = $element.find(".qcol-selcheck").prop("checked");
+        var usableSel = self._currentSelections.filter(function (s) {
+          return s.values && s.values.length;
+        });
+        if (wantSel && !usableSel.length && self._currentSelections.length) {
+          toast("Qlik reports only a range selection here — it cannot be saved as a filter.");
+        }
+        var withSel = wantSel && usableSel.length > 0;
         fetch(self._apiUrl + "/api/comments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -962,7 +1044,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             author: author,
             authorDirectory: self._authorDirectory,
             body: body,
-            selectionState: withSel ? JSON.stringify(self._currentSelections) : null
+            selectionState: withSel ? JSON.stringify(usableSel) : null
           })
         }).then(function (r) {
           if (!r.ok) throw new Error(r.status);
@@ -1057,7 +1139,8 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             var items = selectionItems(s);
             if (!s.field || !items.length) { step(s.field); return; }
             try {
-              var p = self._app.field(s.field).selectValues(items, false, true);
+              // second argument is the alternate state the selection came from
+              var p = self._app.field(s.field, s.state || "$").selectValues(items, false, true);
               if (p && typeof p.then === "function") {
                 p.then(function () { step(s.field); },
                        function (err) { step(s.field, err || "rejected"); });
