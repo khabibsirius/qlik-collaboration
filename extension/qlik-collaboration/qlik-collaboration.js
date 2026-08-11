@@ -1179,6 +1179,66 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         return (s.values || []).map(function (v) { return { qText: v }; });
       }
 
+      // Only pass a state to app.field() when there really is an alternate state.
+      // app.field(name, "$") returns a different wrapper whose selectValues takes
+      // different arguments — Qlik then iterates the wrong thing and throws
+      // "e.forEach is not a function". app.field(name) is the form that works.
+      function fieldFor(s) {
+        return (s.state && s.state !== "$")
+          ? self._app.field(s.field, s.state)
+          : self._app.field(s.field);
+      }
+
+      // Qlik has accepted different argument shapes for selectValues across
+      // versions, so try them in order and stop at the first that works. Which one
+      // succeeded is logged, so a future breakage is one console line to diagnose.
+      function selectAttempts(s) {
+        var objs = selectionItems(s);
+        var texts = objs.map(function (o) { return o.qText; });
+        return [
+          { name: "field.selectValues(objects)",
+            run: function () { return fieldFor(s).selectValues(objs, false, true); } },
+          { name: "field.selectValues(texts)",
+            run: function () { return fieldFor(s).selectValues(texts, false, true); } },
+          { name: "engine.getField().selectValues()",
+            run: function () {
+              var doc = self._app.model && self._app.model.enigmaModel;
+              if (!doc || typeof doc.getField !== "function") throw new Error("no enigma model");
+              return doc.getField(s.field, s.state || "$").then(function (f) {
+                return f.selectValues({ qFieldValues: objs, qToggleMode: false, qSoftLock: true });
+              });
+            } },
+          { name: "field.selectMatch(single value)",
+            run: function () {
+              if (texts.length !== 1) throw new Error("selectMatch handles one value only");
+              return fieldFor(s).selectMatch(texts[0], true);
+            } }
+        ];
+      }
+
+      function runAttempts(attempts, onDone) {
+        var i = 0;
+        (function next(lastErr) {
+          if (i >= attempts.length) { onDone(lastErr || new Error("no method worked")); return; }
+          var a = attempts[i++];
+          var r;
+          try {
+            r = a.run();
+          } catch (err) {
+            console.warn("qlik-collaboration: " + a.name + " threw", err);
+            next(err);
+            return;
+          }
+          if (r && typeof r.then === "function") {
+            r.then(function () { console.log("qlik-collaboration: applied via " + a.name); onDone(null); },
+                   function (err) { console.warn("qlik-collaboration: " + a.name + " rejected", err); next(err); });
+          } else {
+            console.log("qlik-collaboration: applied via " + a.name);
+            onDone(null);
+          }
+        })();
+      }
+
       function applySelections(sels) {
         var pending = sels.length;
         var failed = [];
@@ -1195,20 +1255,8 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
         self._app.clearAll().then(function () {
           sels.forEach(function (s) {
-            var items = selectionItems(s);
-            if (!s.field || !items.length) { step(s.field); return; }
-            try {
-              // second argument is the alternate state the selection came from
-              var p = self._app.field(s.field, s.state || "$").selectValues(items, false, true);
-              if (p && typeof p.then === "function") {
-                p.then(function () { step(s.field); },
-                       function (err) { step(s.field, err || "rejected"); });
-              } else {
-                step(s.field);
-              }
-            } catch (err) {
-              step(s.field, err);
-            }
+            if (!s.field || !selectionItems(s).length) { step(s.field); return; }
+            runAttempts(selectAttempts(s), function (err) { step(s.field, err); });
           });
         }, function (err) {
           console.error("qlik-collaboration: clearAll failed", err);
