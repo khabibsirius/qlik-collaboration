@@ -5,6 +5,11 @@ public class Comment
     public int Id { get; set; }
     public string AppId { get; set; } = "";
     public string SheetId { get; set; } = "";
+    /// <summary>Qlik app title as the author saw it; null for rows written before
+    /// titles were captured, or when the client could not read them.</summary>
+    public string? AppName { get; set; }
+    /// <summary>Qlik sheet title as the author saw it; null when unavailable.</summary>
+    public string? SheetName { get; set; }
     /// <summary>Qlik object ids the comment is attached to; empty = whole sheet.</summary>
     public string[] ObjectIds { get; set; } = [];
     /// <summary>Parent comment id for replies; null = top-level comment.</summary>

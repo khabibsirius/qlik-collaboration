@@ -41,6 +41,19 @@ CREATE TABLE IF NOT EXISTS comments (
 CREATE INDEX IF NOT EXISTS idx_comments_app_sheet ON comments (app_id, sheet_id);
 CREATE INDEX IF NOT EXISTS idx_comments_parent    ON comments (parent_id);
 
+-- The team inbox lists work from every app at once, where an app id is a GUID on
+-- Enterprise and a .qvf path on Desktop — neither tells you which dashboard is
+-- meant. The extension knows the titles, so it sends them and they are stored with
+-- the comment. Nullable: rows written before this, and any client that cannot read
+-- the titles, fall back to showing the ids.
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS app_name   TEXT NULL;
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS sheet_name TEXT NULL;
+
+-- The inbox's main query: open threads across all apps, newest activity first.
+CREATE INDEX IF NOT EXISTS idx_comments_open
+    ON comments (status, created_at DESC)
+    WHERE parent_id IS NULL AND is_deleted = FALSE;
+
 -- Etap 5: which sheet objects a comment is attached to (0..n per comment).
 CREATE TABLE IF NOT EXISTS comment_objects (
     comment_id INTEGER NOT NULL REFERENCES comments(id) ON DELETE CASCADE,

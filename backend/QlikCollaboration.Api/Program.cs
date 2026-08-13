@@ -50,8 +50,22 @@ if (builder.Configuration.GetValue("Swagger:Enabled", true))
 }
 
 app.UseCors();
+
+// The team inbox is a static page served by this same app: no extra host, no extra
+// port, no CORS, and it ships wherever the API ships.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.MapControllers();
 app.MapHub<CommentsHub>("/hubs/comments");
+
+// Which Qlik to send people back to. There is one of these per deployment — a
+// Desktop machine, a test server and a production server all have different hosts —
+// so the inbox reads it at runtime instead of being rebuilt for each.
+app.MapGet("/api/config", (IConfiguration config) => Results.Ok(new
+{
+    qlikBaseUrl = (config["Qlik:BaseUrl"] ?? "http://localhost:4848").TrimEnd('/')
+}));
 
 // Liveness + database probe, used by the container healthcheck and by monitoring.
 app.MapGet("/health", async (NpgsqlDataSource db, ILogger<Program> log) =>

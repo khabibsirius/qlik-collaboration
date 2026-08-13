@@ -210,6 +210,7 @@ Windows Service inject secrets without writing them to a file.
 | `Urls` | `ASPNETCORE_URLS` | listen address, e.g. `http://+:5000` |
 | `Storage:AttachmentsPath` | `Storage__AttachmentsPath` | where uploaded files are written |
 | `Cors:AllowedOrigins:0` | `Cors__AllowedOrigins__0` | allowed browser origin; `*` = any (dev only) |
+| `Qlik:BaseUrl` | `Qlik__BaseUrl` | Qlik hub the inbox's "open the sheet" links point at, e.g. `https://qlik.bank.local`. Different on every server — set it per deployment |
 | `Swagger:Enabled` | `Swagger__Enabled` | expose `/swagger` (keep off in production) |
 
 ---

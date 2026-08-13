@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Qlik Collaboration — team inbox</title>
+<style>
+  :root {
+    --green: #009845;
+    --green-dark: #007d39;
+    --ink: #1f2937;
+    --muted: #6b7280;
+    --faint: #9ca3af;
+    --line: #e5e7eb;
+    --bg: #f4f6f8;
+    --card: #fff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.5 "Segoe UI", -apple-system, Arial, sans-serif;
+  }
+
+  header {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  h1 span { color: var(--faint); font-weight: 400; }
+  .spacer { flex: 1; }
+
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filters button {
+    border: 1px solid var(--line);
+    background: var(--card);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font: inherit; font-size: 12.5px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .filters button:hover { border-color: var(--green); }
+  .filters button.on { background: var(--green); border-color: var(--green); color: #fff; }
+
+  .conn { font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+  .conn.live::before { content: "● "; color: var(--green); }
+  .conn.down::before { content: "● "; color: #dc2626; }
+
+  main { padding: 16px 20px 60px; max-width: 1000px; margin: 0 auto; }
+
+  .group-head {
+    display: flex; align-items: baseline; gap: 8px;
+    margin: 18px 0 8px;
+    font-size: 13px; font-weight: 600;
+  }
+  .group-head:first-child { margin-top: 0; }
+  .group-head a { color: var(--green); text-decoration: none; font-weight: 400; font-size: 12px; }
+  .group-head a:hover { text-decoration: underline; }
+  .group-head .sheet { color: var(--muted); font-weight: 400; }
+
+  .item {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 3px solid transparent;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+  /* Nobody has answered this yet — the whole reason the queue exists. */
+  .item.unanswered { border-left-color: #dc2626; }
+
+  .meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+  .who { font-weight: 600; }
+  .when { color: var(--faint); font-size: 12px; }
+  .body { white-space: pre-wrap; word-break: break-word; margin-bottom: 6px; }
+
+  .status {
+    border: 0; border-radius: 10px;
+    padding: 2px 9px;
+    font: inherit; font-size: 10.5px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .4px;
+    cursor: pointer;
+  }
+  .status-new         { background: #e8f0fe; color: #1a5dc8; }
+  .status-in_progress { background: #fef3e2; color: #b26a00; }
+  .status-fixed       { background: #e6f6ec; color: #1e7e40; }
+  .status-closed      { background: #f1f3f5; color: #7b8794; }
+
+  .tag { font-size: 11.5px; color: var(--muted); }
+  .tag.none { color: #dc2626; font-weight: 600; }
+
+  .actions { display: flex; gap: 12px; align-items: center; }
+  .actions a, .actions button.link {
+    color: var(--muted); font-size: 12px; text-decoration: none;
+    background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit;
+  }
+  .actions a:hover, .actions button.link:hover { color: var(--ink); text-decoration: underline; }
+  .actions .open { color: var(--green); font-weight: 500; }
+
+  .replies { margin: 8px 0 0; padding-left: 12px; border-left: 2px solid var(--line); }
+  .reply { padding: 4px 0; font-size: 13px; }
+  .reply .who { font-size: 13px; }
+
+  .empty { text-align: center; color: var(--faint); padding: 60px 20px; }
+  .empty strong { display: block; font-size: 16px; color: var(--muted); margin-bottom: 6px; }
+  .error { background: #fdecec; border: 1px solid #f5c2c2; color: #c02626;
+           border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Team inbox <span id="count"></span></h1>
+  <div class="filters">
+    <button data-f="all" class="on">All open</button>
+    <button data-f="unanswered">Needs a reply</button>
+    <button data-f="new">New</button>
+    <button data-f="in_progress">In progress</button>
+    <button data-f="fixed">Fixed</button>
+    <button data-f="closed">Include closed</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="conn" id="conn">connecting…</div>
+</header>
+
+<main>
+  <div id="err" class="error" style="display:none"></div>
+  <div id="list"></div>
+</main>
+
+<script src="signalr.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var STATUS_LABEL = { "new": "New", in_progress: "In progress", fixed: "Fixed", closed: "Closed" };
+  var STATUS_ORDER = ["new", "in_progress", "fixed", "closed"];
+
+  var qlikBaseUrl = "";
+  var filter = "all";
+  var items = [];
+  var expanded = {};          // thread id -> replies array, once fetched
+  var lastPayload = "";
+
+  var $list = document.getElementById("list");
+  var $count = document.getElementById("count");
+  var $conn = document.getElementById("conn");
+  var $err = document.getElementById("err");
+
+  function esc(s) {
+    return String(s === null || s === undefined ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function fmtTime(iso) {
+    var d = new Date(iso), now = new Date();
+    var hm = ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+    var days = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 86400000);
+    if (days === 0) return "today " + hm;
+    if (days === 1) return "yesterday " + hm;
+    if (days < 7) return days + " days ago";
+    return d.toLocaleDateString();
+  }
+
+  // Same shape on Desktop and Enterprise; only the app id differs (a .qvf path
+  // there, a GUID here), and encoding covers both.
+  function qlikUrl(it) {
+    if (!qlikBaseUrl) return null;
+    return qlikBaseUrl + "/sense/app/" + encodeURIComponent(it.appId) +
+           "/sheet/" + encodeURIComponent(it.sheetId) + "/state/analysis";
+  }
+
+  function showError(msg) {
+    $err.textContent = msg;
+    $err.style.display = "";
+  }
+  function clearError() { $err.style.display = "none"; }
+
+  function matches(it) {
+    if (filter === "all") return it.status !== "closed";
+    if (filter === "closed") return true;              // "include closed" = everything
+    if (filter === "unanswered") return it.replyCount === 0 && it.status !== "closed";
+    return it.status === filter;
+  }
+
+  function render() {
+    var shown = items.filter(matches);
+    $count.textContent = "(" + shown.length + ")";
+
+    if (!shown.length) {
+      $list.innerHTML = '<div class="empty"><strong>Nothing here</strong>' +
+        (filter === "all" ? "Every comment has been closed." : "No threads match this filter.") +
+        "</div>";
+      return;
+    }
+
+    // Group by dashboard + sheet: the team thinks in dashboards, not in comment ids.
+    var groups = [];
+    var byKey = {};
+    shown.forEach(function (it) {
+      var key = it.appId + "|" + it.sheetId;
+      if (!byKey[key]) { byKey[key] = { key: key, first: it, items: [] }; groups.push(byKey[key]); }
+      byKey[key].items.push(it);
+    });
+
+    $list.innerHTML = groups.map(function (g) {
+      var it = g.first;
+      var url = qlikUrl(it);
+      var appLabel = it.appName || it.appId;
+      var sheetLabel = it.sheetName || it.sheetId;
+      return '<div class="group-head">' +
+               "<span>" + esc(appLabel) + '</span><span class="sheet">› ' + esc(sheetLabel) + "</span>" +
+               (url ? ' <a href="' + esc(url) + '" target="_blank" rel="noopener">open in Qlik ↗</a>' : "") +
+             "</div>" +
+             g.items.map(one).join("");
+    }).join("");
+  }
+
+  function one(it) {
+    var url = qlikUrl(it);
+    var reply = it.replyCount === 0
+      ? '<span class="tag none">no reply yet</span>'
+      : '<span class="tag">' + it.replyCount + (it.replyCount === 1 ? " reply" : " replies") + "</span>";
+    var isOpen = Object.prototype.hasOwnProperty.call(expanded, it.id);
+
+    var h = '<div class="item' + (it.replyCount === 0 && it.status !== "closed" ? " unanswered" : "") + '">' +
+      '<div class="meta">' +
+        '<span class="who">' + esc(it.author) + "</span>" +
+        '<span class="when">' + esc(fmtTime(it.createdAt)) + "</span>" +
+        '<button class="status status-' + esc(it.status) + '" data-id="' + it.id +
+          '" data-status="' + esc(it.status) + '" title="Click to move it along">' +
+          esc(STATUS_LABEL[it.status] || it.status) + "</button>" +
+        reply +
+      "</div>" +
+      '<div class="body">' + esc(it.body) + "</div>" +
+      '<div class="actions">' +
+        (url ? '<a class="open" href="' + esc(url) + '" target="_blank" rel="noopener">open the sheet ↗</a>' : "") +
+        (it.replyCount > 0
+          ? '<button class="link" data-toggle="' + it.id + '">' +
+              (isOpen ? "hide replies" : "show replies") + "</button>"
+          : "") +
+      "</div>";
+
+    if (isOpen) {
+      var rs = expanded[it.id];
+      h += '<div class="replies">' + (rs.length
+        ? rs.map(function (r) {
+            return '<div class="reply"><span class="who">' + esc(r.author) + "</span> " +
+                   '<span class="when">' + esc(fmtTime(r.createdAt)) + "</span><br/>" +
+                   esc(r.body) + "</div>";
+          }).join("")
+        : '<div class="reply when">No replies.</div>') + "</div>";
+    }
+    return h + "</div>";
+  }
+
+  function load() {
+    var includeClosed = (filter === "closed");
+    fetch("api/inbox?includeClosed=" + includeClosed)
+      .then(function (r) { if (!r.ok) throw new Error("server answered " + r.status); return r.json(); })
+      .then(function (data) {
+        clearError();
+        // Re-rendering on every poll would collapse an expanded thread under the
+        // reader's cursor, so only redraw when something actually changed.
+        var payload = JSON.stringify(data);
+        if (payload === lastPayload) return;
+        lastPayload = payload;
+        items = data;
+        render();
+      })
+      .catch(function (err) {
+        showError("Cannot load the inbox: " + (err && err.message) +
+                  ". Is the backend running?");
+      });
+  }
+
+  document.querySelector(".filters").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-f]");
+    if (!btn) return;
+    filter = btn.getAttribute("data-f");
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (b) {
+      b.classList.toggle("on", b === btn);
+    });
+    lastPayload = "";       // the query itself changes for "include closed"
+    load();
+  });
+
+  $list.addEventListener("click", function (e) {
+    var status = e.target.closest("button.status");
+    if (status) {
+      var current = status.getAttribute("data-status");
+      var next = STATUS_ORDER[(STATUS_ORDER.indexOf(current) + 1) % STATUS_ORDER.length];
+      fetch("api/comments/" + status.getAttribute("data-id") + "/status", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: next })
+      }).then(function (r) {
+        if (!r.ok) throw new Error("server answered " + r.status);
+        lastPayload = "";
+        load();
+      }).catch(function (err) {
+        showError("Could not change the status: " + (err && err.message));
+      });
+      return;
+    }
+
+    var toggle = e.target.closest("button[data-toggle]");
+    if (toggle) {
+      var id = toggle.getAttribute("data-toggle");
+      if (Object.prototype.hasOwnProperty.call(expanded, id)) {
+        delete expanded[id];
+        render();
+        return;
+      }
+      fetch("api/inbox/" + id + "/replies")
+        .then(function (r) { return r.json(); })
+        .then(function (rs) { expanded[id] = rs || []; render(); })
+        .catch(function () { showError("Could not load the replies."); });
+    }
+  });
+
+  // ---- live updates -------------------------------------------------------
+  // Same hub the Qlik panel uses. Polling stays as the safety net, slowed right
+  // down once the socket is up.
+  var pollMs = 10000;
+  var timer = null;
+  function setPoll(ms) {
+    if (timer) clearInterval(timer);
+    pollMs = ms;
+    timer = setInterval(load, ms);
+  }
+
+  function connect() {
+    if (typeof signalR === "undefined") { $conn.textContent = "polling"; return; }
+    try {
+      var conn = new signalR.HubConnectionBuilder()
+        .withUrl("hubs/comments")
+        .withAutomaticReconnect()
+        .build();
+      conn.on("commentsChanged", load);
+      conn.onreconnected(function () {
+        $conn.className = "conn live"; $conn.textContent = "live"; load();
+      });
+      conn.onclose(function () {
+        $conn.className = "conn down"; $conn.textContent = "reconnecting…"; setPoll(10000);
+      });
+      conn.start().then(function () {
+        $conn.className = "conn live";
+        $conn.textContent = "live";
+        setPoll(60000);
+      }).catch(function () {
+        $conn.className = "conn"; $conn.textContent = "polling";
+      });
+    } catch (e) {
+      $conn.className = "conn"; $conn.textContent = "polling";
+    }
+  }
+
+  // The Qlik host differs per deployment, so ask the server before first render —
+  // otherwise every "open the sheet" link would point at the wrong machine.
+  fetch("api/config")
+    .then(function (r) { return r.json(); })
+    .then(function (c) { qlikBaseUrl = (c && c.qlikBaseUrl) || ""; })
+    .catch(function () { /* links are simply omitted */ })
+    .then(function () {
+      load();
+      setPoll(10000);
+      connect();
+    });
+})();
+</script>
+</body>
+</html>

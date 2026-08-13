@@ -81,6 +81,37 @@ Everyone the team knows about — the audience every comment is broadcast to. Re
 Announces a user who has opened the panel, so they join the notification audience
 without having to post first. Idempotent; returns `204`.
 
+## GET /api/inbox?includeClosed=false
+
+The team's work queue: open threads across **every** app, newest activity first
+(max 200). Replies are folded into their parent — the unit of work is the thread,
+not the message.
+
+```json
+[{ "id": 13, "appId": "…", "sheetId": "…",
+   "appName": "Credit Portfolio", "sheetName": "Overview",
+   "author": "director.rakhimov", "body": "…", "status": "new",
+   "createdAt": "…", "replyCount": 0, "lastActivityAt": "…" }]
+```
+
+`replyCount: 0` is the signal the queue exists for — feedback nobody has answered.
+`appName`/`sheetName` are null for comments written before titles were captured, or
+when the client could not read them; fall back to the ids.
+
+`includeClosed=true` returns closed threads as well.
+
+## GET /api/inbox/{id}/replies
+
+The replies of one thread, oldest first — fetched when a row is expanded.
+
+## GET /api/config
+
+Settings the inbox page needs at runtime, so one build serves every deployment:
+
+```json
+{ "qlikBaseUrl": "http://localhost:4848" }
+```
+
 ## GET /api/notifications?user=
 
 Latest 50 notifications for a user, newest first:

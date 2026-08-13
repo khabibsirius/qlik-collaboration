@@ -417,15 +417,21 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         }
       }
 
-      // discover alternate states defined in the app
+      // discover alternate states defined in the app, and pick up the app title on
+      // the way past: the team inbox lists work from every app at once, where an id
+      // is a GUID on Enterprise and a .qvf path on Desktop. Neither says which
+      // dashboard is meant, and only the client can see the title.
+      self._appName = null;
+      self._sheetName = null;
       try {
         app.getAppLayout(function (layout) {
-          var names = (layout && layout.qLayout && layout.qLayout.qStateNames) ||
-                      (layout && layout.qStateNames) || [];
+          var l = (layout && layout.qLayout) || layout || {};
+          var names = l.qStateNames || [];
           names.forEach(trackState);
           if (names.length) console.log("qlik-collaboration: alternate states:", names);
+          self._appName = l.qTitle || (l.qMeta && l.qMeta.title) || null;
         });
-      } catch (e) { /* no alternate states available */ }
+      } catch (e) { /* titles stay null; the inbox falls back to the ids */ }
 
       // A selected value may be numeric (Year, amounts, dates). Selecting such a
       // field back by its TEXT alone silently matches nothing, so keep the number
@@ -564,7 +570,12 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       function loadCells() {
         return app.getObjectProperties(self._sheetId).then(function (model) {
-          var cells = (model.properties && model.properties.cells) || [];
+          var props = model.properties || {};
+          // The sheet's own title rides along with the properties we already fetch
+          // for the chart picker — no extra call to get a readable name for the inbox.
+          self._sheetName = (props.qMetaDef && props.qMetaDef.title) ||
+                            (props.qMeta && props.qMeta.title) || null;
+          var cells = props.cells || [];
           var $sel = $element.find(".qcol-attach");
           $sel.find("option:not(:first)").remove();
           self._cellsById = {};
@@ -1160,6 +1171,10 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           body: JSON.stringify({
             appId: self._appId,
             sheetId: self._sheetId,
+            // Stored with the comment so the team inbox can name the dashboard
+            // instead of printing a GUID. Null is fine — it falls back to the id.
+            appName: self._appName,
+            sheetName: self._sheetName,
             objectIds: self._attachTargets,
             parentId: self._replyTo,
             author: author,

@@ -13,7 +13,7 @@ public class CommentsController : ControllerBase
 {
     // object_ids is aggregated from the comment_objects junction table
     private const string SelectComment =
-        @"SELECT c.id, c.app_id, c.sheet_id, c.parent_id, c.author, c.body,
+        @"SELECT c.id, c.app_id, c.sheet_id, c.app_name, c.sheet_name, c.parent_id, c.author, c.body,
                  c.selection_state, c.status, c.is_deleted, c.created_at, c.updated_at,
                  COALESCE(array_agg(co.object_id) FILTER (WHERE co.object_id IS NOT NULL), '{}') AS object_ids
           FROM comments c
@@ -73,7 +73,11 @@ public class CommentsController : ControllerBase
         string AppId, string SheetId, string[]? ObjectIds, int? ParentId,
         string Author, string Body, string? SelectionState,
         /// <summary>Qlik UserDirectory of the author ('BANK' on Enterprise) — audit only.</summary>
-        string? AuthorDirectory = null);
+        string? AuthorDirectory = null,
+        /// <summary>Qlik app title, so the inbox can name the dashboard instead of its id.</summary>
+        string? AppName = null,
+        /// <summary>Qlik sheet title, same reason.</summary>
+        string? SheetName = null);
 
     [HttpPost]
     public async Task<ActionResult<Comment>> Create(CreateCommentDto dto)
@@ -98,8 +102,10 @@ public class CommentsController : ControllerBase
             new { author, directory = string.IsNullOrWhiteSpace(dto.AuthorDirectory) ? null : dto.AuthorDirectory.Trim() }, tx);
 
         var id = await conn.ExecuteScalarAsync<int>(
-            @"INSERT INTO comments (app_id, sheet_id, parent_id, author, body, selection_state)
-              VALUES (@AppId, @SheetId, @ParentId, @Author, @Body, @SelectionState::jsonb)
+            @"INSERT INTO comments (app_id, sheet_id, app_name, sheet_name,
+                                    parent_id, author, body, selection_state)
+              VALUES (@AppId, @SheetId, @AppName, @SheetName,
+                      @ParentId, @Author, @Body, @SelectionState::jsonb)
               RETURNING id", dto, tx);
 
         var objectIds = (dto.ObjectIds ?? []).Where(o => !string.IsNullOrWhiteSpace(o)).Distinct().ToArray();
