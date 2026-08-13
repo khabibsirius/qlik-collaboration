@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.9.0";
+  var EXT_VERSION = "0.10.0";
 
   function esc(text) {
     return String(text)
@@ -138,6 +138,17 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
                     { value: "manual", label: "Manual name entry (development)" }
                   ],
                   defaultValue: "auto"
+                },
+                displayMode: {
+                  ref: "collab.displayMode",
+                  label: "Panel display",
+                  type: "string",
+                  component: "dropdown",
+                  options: [
+                    { value: "bubble", label: "Bubble — collapsed to a button, expands over the sheet" },
+                    { value: "docked", label: "Docked — always open, fills its cell" }
+                  ],
+                  defaultValue: "bubble"
                 }
               }
             }
@@ -154,6 +165,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       var apiUrl = (layout.collab && layout.collab.apiUrl) || "http://localhost:5000";
       var pollMs = ((layout.collab && layout.collab.pollSeconds) || 3) * 1000;
       var identityMode = (layout.collab && layout.collab.identityMode) || "auto";
+      var displayMode = (layout.collab && layout.collab.displayMode) || "bubble";
 
       // Build the UI once; later paints only re-apply changed settings.
       // (Qlik re-paints on resize and after every property-panel edit, so this
@@ -170,6 +182,10 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           if (self._timer) clearInterval(self._timer);
           self._timer = setInterval(self._tick, self._live ? 30000 : pollMs);
         }
+        // Qlik repaints when the sheet switches between analysis and edit mode, so
+        // this is also where floating gives way to docked while a sheet is edited.
+        if (self._displayMode !== displayMode) self._displayMode = displayMode;
+        if (self._applyDisplayMode) self._applyDisplayMode();
         // Qlik repaints on resize, so this keeps the size buckets right even on a
         // client with no ResizeObserver.
         if (self._applySize) self._applySize();
@@ -193,6 +209,12 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // ---------- static skeleton ----------
       $element.html(
         '<div class="qcol-panel">' +
+        // Collapsed state. Lives in the cell (make that cell small on the sheet);
+        // expanding lifts the panel out over the dashboard.
+        '  <button class="qcol-bubble" title="Comments">' +
+        '    <span class="qcol-bubble-icon">💬</span>' +
+        '    <span class="qcol-bubble-badge" style="display:none"></span>' +
+        '  </button>' +
         '  <div class="qcol-header">' +
         '    <span class="qcol-title" title="Qlik Collaboration v' + EXT_VERSION + '">Comments ' +
         '<span class="qcol-count"></span> <span class="qcol-ver">v' + EXT_VERSION + '</span></span>' +
@@ -202,6 +224,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '      </span>' +
         '      <span class="qcol-bell" title="New comments from the team">🔔<span class="qcol-badge" style="display:none"></span></span>' +
         '      <span class="qcol-conn" title="Backend connection">●</span>' +
+        '      <span class="qcol-collapse" title="Collapse">✕</span>' +
         '    </span>' +
         '  </div>' +
         '  <div class="qcol-notifs" style="display:none">' +
@@ -259,6 +282,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // kept on `self` (not a closure var) so a property-panel change during a
       // later paint is picked up by the resolver below
       self._identityMode = identityMode;
+      self._displayMode = displayMode;
       self._applyMethod = (layout.collab && layout.collab.applyMethod) || "auto";
       self._authorDirectory = null;
 
@@ -800,8 +824,15 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           .then(function (list) {
             self._notifs = list || [];
             var unread = self._notifs.filter(function (n) { return !n.isRead; }).length;
+            var label = unread > 99 ? "99+" : String(unread);
             var $badge = $element.find(".qcol-badge");
-            if (unread > 0) $badge.text(unread > 99 ? "99+" : unread).show(); else $badge.hide();
+            if (unread > 0) $badge.text(label).show(); else $badge.hide();
+            // Collapsed, the bubble is the only thing on screen — without the count on
+            // it, hiding the panel would also hide the fact that anyone had written.
+            var $bub = $element.find(".qcol-bubble-badge");
+            if (unread > 0) $bub.text(label).show(); else $bub.hide();
+            $element.find(".qcol-bubble").attr("title",
+              unread > 0 ? "Comments — " + unread + " new" : "Comments");
 
             // Rebuilding the open dropdown on every poll would reset its scroll
             // under the user's cursor — only redraw when something changed.
@@ -1610,6 +1641,89 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         } catch (err) { /* signalR lib unavailable — polling continues */ }
       }
 
+      // ---------- bubble / expand ----------
+      // A Qlik extension cannot resize its own cell — the sheet layout owns that — so
+      // "collapse out of the way" cannot mean shrinking in place: a small bubble in a
+      // big cell still occupies the whole cell. Collapsed, the panel is only the
+      // bubble, so a small cell is enough; expanded, it lifts out with position:fixed
+      // and floats over the dashboard.
+
+      var $panel = $element.find(".qcol-panel");
+
+      function bubbleWanted() {
+        if (self._displayMode === "docked") return false;
+        // Floating over a sheet that is being edited gets in the way of editing it.
+        try {
+          var mode = qlik.navigation.getMode && qlik.navigation.getMode();
+          if (mode && String(mode).toLowerCase().indexOf("edit") !== -1) return false;
+        } catch (e) { /* older client — assume analysis */ }
+        return true;
+      }
+
+      // position:fixed is relative to the viewport only while no ancestor has a
+      // transform, filter or contain — any of those silently turn it into "fixed
+      // inside that ancestor", which here means trapped in the cell and clipped. Rather
+      // than hope, measure once: park a probe at a known viewport spot and see whether
+      // it landed there. If not, this client cannot float and we stay docked.
+      function canFloat() {
+        if (self._canFloat !== undefined) return self._canFloat;
+        var probe = document.createElement("div");
+        probe.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;" +
+                              "opacity:0;pointer-events:none";
+        $panel[0].appendChild(probe);
+        var r = probe.getBoundingClientRect();
+        probe.parentNode.removeChild(probe);
+        self._canFloat = Math.abs(r.top) < 2 && Math.abs(r.left) < 2;
+        if (!self._canFloat) {
+          console.warn("qlik-collaboration: this client anchors position:fixed to the " +
+                       "cell, so the panel cannot float — staying docked.");
+        }
+        return self._canFloat;
+      }
+
+      function applyDisplayMode() {
+        var bubble = bubbleWanted() && canFloat();
+        $panel.toggleClass("qcol-bubbly", bubble);
+        if (!bubble) {
+          $panel.removeClass("qcol-expanded");
+          return;
+        }
+        $panel.toggleClass("qcol-expanded", !!self._expanded);
+      }
+      self._applyDisplayMode = applyDisplayMode;
+
+      function setExpanded(open) {
+        self._expanded = open;
+        try { localStorage.setItem("qlikCollab.expanded", open ? "1" : "0"); } catch (e) { /* noop */ }
+        applyDisplayMode();
+        if (open) {
+          if (self._applySize) self._applySize();
+          // the list only auto-sticks to the bottom while it has a height to measure
+          $list.scrollTop($list[0] ? $list[0].scrollHeight : 0);
+          $input.focus();
+        }
+      }
+
+      // Reopen the way it was left. Default collapsed: the point of the exercise is
+      // that the dashboard is not covered until someone asks for the discussion.
+      try { self._expanded = localStorage.getItem("qlikCollab.expanded") === "1"; }
+      catch (e) { self._expanded = false; }
+
+      $element.on("click", ".qcol-bubble", function (e) {
+        e.preventDefault();
+        setExpanded(true);
+      });
+      $element.on("click", ".qcol-collapse", function (e) {
+        e.preventDefault();
+        setExpanded(false);
+      });
+      // Esc closes it, the way every overlay on the web does.
+      $element.on("keydown", function (e) {
+        if (e.key === "Escape" && self._expanded && !self._picking) setExpanded(false);
+      });
+
+      applyDisplayMode();
+
       // ---------- size adaptation ----------
       // A Qlik object is resized by dragging its cell, so the viewport never changes
       // and media queries never fire for it. Watch the element itself instead, and
@@ -1617,8 +1731,10 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // was "hard to see", so shrinking the text would have made it worse.
 
       function applySize() {
-        var w = $element.width() || 0;
-        var h = $element.height() || 0;
+        // Measure the panel, not the cell: once floating they are different boxes,
+        // and while docked the panel fills the cell so the two agree anyway.
+        var w = $panel.width() || 0;
+        var h = $panel.height() || 0;
         var narrow = w > 0 && w < 280;
         var short = h > 0 && h < 340;
         var sig = (narrow ? "n" : "") + (short ? "s" : "");
@@ -1626,7 +1742,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         // touch it when the bucket actually changed.
         if (sig === self._sizeSig) return;
         self._sizeSig = sig;
-        $element.find(".qcol-panel")
+        $panel
           .toggleClass("qcol-narrow", narrow)
           .toggleClass("qcol-short", short);
         autoGrow();                 // the composer's max height differs per bucket

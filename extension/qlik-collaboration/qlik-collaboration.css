@@ -577,6 +577,92 @@
    visible share of it, so they stay hover-only and the separators go. */
 .qcol-short .qcol-day { display: none; }
 
+/* ---------- bubble mode ----------
+   A Qlik extension cannot resize its own cell, so collapsing in place would leave a
+   small button inside a full-size hole. Instead the collapsed panel IS just the
+   button — put the object in a small cell — and expanding lifts it out of the cell
+   with position:fixed to float over the dashboard. The JS probes at runtime whether
+   this client really anchors fixed to the viewport, and stays docked when it does not. */
+
+.qcol-bubble { display: none; }
+
+/* Collapsed: the button and nothing else. !important because jQuery's show()/hide()
+   write inline display on these same rows as data arrives — an inline "block" set
+   while the panel was open would otherwise leave the selections strip or a chip row
+   stranded on the sheet next to the bubble. Scoped to :not(.qcol-expanded) so that
+   once open, inline styles govern again exactly as they do when docked. */
+.qcol-bubbly:not(.qcol-expanded) {
+  display: block;
+  height: auto;
+  background: none;
+  overflow: visible;
+}
+.qcol-bubbly:not(.qcol-expanded) > *:not(.qcol-bubble) { display: none !important; }
+.qcol-bubbly:not(.qcol-expanded) .qcol-bubble {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--qcol-green);
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(16, 24, 40, .25);
+  transition: transform .12s, background .15s;
+}
+.qcol-bubbly:not(.qcol-expanded) .qcol-bubble:hover {
+  background: var(--qcol-green-dark);
+  transform: scale(1.06);
+}
+.qcol-bubble-badge {
+  position: absolute;
+  top: -3px; right: -3px;
+  background: #dc2626;
+  color: #fff;
+  border-radius: 10px;
+  min-width: 9px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+/* expanded: out of the cell, over the sheet */
+.qcol-bubbly.qcol-expanded {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2147483000;          /* above Qlik's own chrome, below nothing that matters */
+  width: 370px;
+  max-width: calc(100vw - 36px);
+  height: 560px;
+  max-height: calc(100vh - 120px);
+  background: var(--qcol-bg);
+  border: 1px solid var(--qcol-line);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 12px 34px rgba(16, 24, 40, .28);
+  animation: qcol-rise .14s ease-out;
+}
+@keyframes qcol-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+/* Expanded, nothing above interferes: the panel is its normal flex column, so every
+   row behaves exactly as it does docked. Only the bubble itself stays hidden. */
+.qcol-bubbly.qcol-expanded .qcol-bubble { display: none; }
+
+/* the ✕ only exists when there is something to collapse back into */
+.qcol-collapse { display: none; cursor: pointer; color: var(--qcol-faint); font-size: 12px; }
+.qcol-collapse:hover { color: #dc2626; }
+.qcol-bubbly.qcol-expanded .qcol-collapse { display: inline; }
+
 /* ---------- picking-mode highlights on Qlik cells (global) ---------- */
 
 .qcol-pick-highlight {
