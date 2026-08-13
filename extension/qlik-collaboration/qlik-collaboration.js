@@ -1046,13 +1046,22 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       // ---------- data ----------
 
+      // fetch() rejects with a TypeError when the request never reached a server at
+      // all — backend down, wrong port, blocked by the Enterprise CSP. That is a very
+      // different problem from a server that answered and said no, so name it.
+      function describeFetchError(err) {
+        if (err instanceof TypeError) return "no response — backend down, wrong URL, or blocked by the Qlik CSP";
+        return (err && err.message) ? "server answered " + err.message : "unknown error";
+      }
+
       function refresh() {
         var url = self._apiUrl + "/api/comments?appId=" + encodeURIComponent(self._appId) +
                   "&sheetId=" + encodeURIComponent(self._sheetId);
         fetch(url)
           .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(function (data) {
-            $conn.addClass("qcol-ok").removeClass("qcol-err");
+            $conn.addClass("qcol-ok").removeClass("qcol-err")
+                 .attr("title", "Connected to " + self._apiUrl);
             var payload = JSON.stringify(data);
             if (payload !== self._lastPayload) {   // re-render only on change
               self._lastPayload = payload;
@@ -1064,7 +1073,14 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
               consumePendingGoto();
             }
           })
-          .catch(function () { $conn.addClass("qcol-err").removeClass("qcol-ok"); });
+          // Say WHICH address is unreachable. "The dot is red" sends people looking
+          // at Qlik, at the network, at the extension — anywhere but the one setting
+          // that is actually wrong.
+          .catch(function (err) {
+            $conn.addClass("qcol-err").removeClass("qcol-ok")
+                 .attr("title", "Cannot reach the backend at " + self._apiUrl +
+                                " — is it running? (" + describeFetchError(err) + ")");
+          });
       }
 
       function uploadPending(commentId) {
@@ -1126,7 +1142,14 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           renderPending();
           $element.find(".qcol-replybar").hide();
           refresh();
-        }).catch(function () { /* connection dot already reflects errors */ });
+        }).catch(function (err) {
+          // This used to fail silently: the comment vanished from nowhere the user
+          // could see, the text stayed in the box, and the only clue was a small red
+          // dot in the header. Nothing is cleared on this path, so the comment, the
+          // attachments and the reply target all survive a retry.
+          console.error("qlik-collaboration: could not send the comment", err);
+          toast("Comment NOT sent — " + describeFetchError(err) + ". Your text is kept, try again.");
+        });
       }
 
       // ---------- events ----------
