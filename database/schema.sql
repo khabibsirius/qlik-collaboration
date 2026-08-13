@@ -102,3 +102,15 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (username, is_read);
+
+-- One row per digest e-mail actually sent. The next digest reports what happened
+-- since the last row, which is what stops a digest every 30 minutes from repeating
+-- the same unanswered comment until the team filters the sender into a folder.
+CREATE TABLE IF NOT EXISTS digest_runs (
+    id        SERIAL PRIMARY KEY,
+    sent_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- what went out, for answering "why did I get this?" without a mail server log
+    new_items INTEGER NOT NULL DEFAULT 0,
+    waiting   INTEGER NOT NULL DEFAULT 0,
+    recipients TEXT NOT NULL DEFAULT ''
+);

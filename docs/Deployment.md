@@ -212,6 +212,28 @@ Windows Service inject secrets without writing them to a file.
 | `Cors:AllowedOrigins:0` | `Cors__AllowedOrigins__0` | allowed browser origin; `*` = any (dev only) |
 | `Qlik:BaseUrl` | `Qlik__BaseUrl` | Qlik hub the inbox's "open the sheet" links point at, e.g. `https://qlik.bank.local`. Different on every server — set it per deployment |
 | `Team:Members:0` | `Team__Members__0` | **Set this.** Usernames of the BI team, who see every thread. Everyone else sees only the threads they started. Empty = everyone is a guest and the team sees nothing; the API warns at startup |
+| `Email:Enabled` | `Email__Enabled` | turn the digest on (default `false`) |
+| `Email:Host` / `Email:Port` | `Email__Host` / `Email__Port` | internal SMTP relay, e.g. `smtp.bank.local` / `25` |
+| `Email:From` | `Email__From` | sender address the relay will accept |
+| `Email:Recipients:0` | `Email__Recipients__0` | the BI team's **e-mail addresses** (usernames are not addresses) |
+| `Email:PickupDirectory` | `Email__PickupDirectory` | write `.eml` files to this folder **instead of sending** — how to test before you have a relay |
+| `Email:IntervalMinutes` | `Email__IntervalMinutes` | how often to check (default 30, minimum 5) |
+| `Email:ReminderHours` | `Email__ReminderHours` | with nothing new, re-send the unanswered list at most this often (default 24) |
+| `Email:InboxUrl` | `Email__InboxUrl` | the team inbox address the e-mail links to |
+
+### Testing the digest without a mail server
+
+Set `Email:Enabled=true` and `Email:PickupDirectory` to a folder, leave `Email:Host`
+empty, then:
+
+```powershell
+curl.exe "http://localhost:5000/api/digest/preview"      # the HTML, in a browser
+curl.exe "http://localhost:5000/api/digest/status"       # what the next run would do
+curl.exe -X POST "http://localhost:5000/api/digest/send?force=true"
+```
+
+The `.eml` that appears in the folder opens in Outlook and is byte-for-byte what the
+relay would have delivered. Clear `PickupDirectory` and set `Host` to go live.
 | `Swagger:Enabled` | `Swagger__Enabled` | expose `/swagger` (keep off in production) |
 
 ---

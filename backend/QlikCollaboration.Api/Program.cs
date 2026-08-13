@@ -17,6 +17,11 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<TeamRoster>();
+builder.Services.AddScoped<DigestBuilder>();
+// Singleton and hosted service are the same instance, so the controller's manual
+// trigger runs the identical code path as the timer rather than a copy of it.
+builder.Services.AddSingleton<EmailDigestService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<EmailDigestService>());
 
 var connectionString = builder.Configuration.GetConnectionString("Postgres");
 if (string.IsNullOrWhiteSpace(connectionString))

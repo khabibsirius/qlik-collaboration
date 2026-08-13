@@ -126,6 +126,29 @@ when the client could not read them; fall back to the ids.
 
 The replies of one thread, oldest first — fetched when a row is expanded.
 
+## GET /api/digest/preview · /api/digest/preview.txt · /api/digest/status
+
+The digest e-mail as it stands right now — HTML, plain text, or what the next run
+would decide. Nothing is sent and nothing is recorded, so these are safe to open at
+any time.
+
+```json
+{ "lastSent": "…", "newItems": 2, "waiting": 5, "wouldSend": true }
+```
+
+## POST /api/digest/send?force=false
+
+Sends now instead of waiting for the timer, and returns what it did. Without
+`force`, the same rule the timer uses applies: send when something has been
+written since the last digest, and at most once every `Email:ReminderHours` when
+nothing is new but comments are still unanswered. `force=true` ignores that rule,
+which is how a mail configuration is tested against a quiet database.
+
+```json
+{ "result": "sent to 2 recipient(s): 2 new, 5 waiting" }
+{ "result": "nothing new; reminder not due for another 21.4h" }
+```
+
 ## GET /api/config
 
 Settings the inbox page needs at runtime, so one build serves every deployment:
