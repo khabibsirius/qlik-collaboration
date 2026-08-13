@@ -338,14 +338,6 @@
   line-height: 1.55;
 }
 
-.qcol-mention {
-  background: #e6f6ec;
-  color: #00753a;
-  border-radius: 4px;
-  padding: 0 3px;
-  font-weight: 600;
-}
-
 /* attachments on comments */
 .qcol-atts { margin: 4px 0 4px; }
 .qcol-att-img {
@@ -502,25 +494,6 @@
   font-size: 11.5px;
 }
 .qcol-withsel input { vertical-align: middle; margin-right: 5px; accent-color: var(--qcol-green); }
-
-/* @mention autocomplete */
-.qcol-mentionbox {
-  background: var(--qcol-card);
-  border: 1px solid var(--qcol-line);
-  border-radius: 7px;
-  margin-bottom: 5px;
-  max-height: 130px;
-  overflow-y: auto;
-  box-shadow: 0 4px 10px rgba(16, 24, 40, .08);
-}
-.qcol-mentionopt {
-  display: block;
-  padding: 5px 10px;
-  color: var(--qcol-ink);
-  text-decoration: none;
-  font-size: 12px;
-}
-.qcol-mentionopt:hover { background: #f0faf4; color: #00753a; }
 
 .qcol-input {
   width: 100%;

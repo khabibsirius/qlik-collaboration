@@ -31,7 +31,6 @@ services:
       ConnectionStrings__Postgres: "Host=${DB_HOST:-host.docker.internal};Port=${DB_PORT:-5432};Database=${DB_NAME:-qlik_collaboration};Username=${DB_USER:-postgres};Password=${DB_PASSWORD:?DB_PASSWORD must be set in .env}"
       Storage__AttachmentsPath: /data/uploads
       Cors__AllowedOrigins__0: ${QLIK_ORIGIN:-*}
-      Notifications__BroadcastWhenNoMention: "${BROADCAST_WHEN_NO_MENTION:-true}"
       Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
       ASPNETCORE_ENVIRONMENT: Production
     ports:

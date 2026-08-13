@@ -41,18 +41,20 @@ All non-deleted comments for a sheet (including replies), oldest first.
 
 Returns `201` with the created comment.
 
-**Notification routing** — who gets notified by this comment:
+**Notification routing** — every comment is team-wide news, so **everyone except
+the author** is notified. There are no private messages and no way to address a
+comment at one person; the only difference between recipients is the `kind` they
+see:
 
-| Comment contains | Who is notified | `kind` |
-|---|---|---|
-| `@name` of known users | only those users | `mention` |
-| nothing (a reply) | the parent comment's author | `reply` |
-| no `@mention` at all | **everyone except the author** | `broadcast` |
+| Recipient | `kind` |
+|---|---|
+| the author of the comment being replied to | `reply` |
+| everyone else | `comment` |
 
-A comment addressed to nobody in particular is team-wide news, so it reaches the
-whole team — otherwise it would reach nobody until someone happened to open the
-sheet. Turn it off with `Notifications:BroadcastWhenNoMention: false` in
-`appsettings.json` (then only mentions and replies notify).
+The audience is every row in `users`, which the panel populates when someone
+opens it — not only when they post (see `POST /api/users`). Notifications written
+before @mentions were removed keep their old `mention` / `broadcast` kinds and
+still render.
 
 ## DELETE /api/comments/{id}?author=
 
@@ -68,15 +70,24 @@ Returns the updated comment.
 
 ## GET /api/users
 
-All known users (everyone who has commented) — feeds @mention autocomplete. Returns `["Ivan", "khabib"]`.
+Everyone the team knows about — the audience every comment is broadcast to. Returns `["Ivan", "khabib"]`.
+
+## POST /api/users
+
+```json
+{ "username": "ivanov", "userDirectory": "BANK" }   // userDirectory optional, audit only
+```
+
+Announces a user who has opened the panel, so they join the notification audience
+without having to post first. Idempotent; returns `204`.
 
 ## GET /api/notifications?user=
 
-Latest 50 notifications for a user (mentions + replies), newest first:
+Latest 50 notifications for a user, newest first:
 
 ```json
-[{ "id": 1, "kind": "mention", "isRead": false, "createdAt": "…", "commentId": 13,
-   "fromAuthor": "Ivan", "excerpt": "@khabib please check this", "appId": "…", "sheetId": "…" }]
+[{ "id": 1, "kind": "comment", "isRead": false, "createdAt": "…", "commentId": 13,
+   "fromAuthor": "Ivan", "excerpt": "please check this", "appId": "…", "sheetId": "…" }]
 ```
 
 Each notification carries `commentId`, `appId` and `sheetId` — everything the panel

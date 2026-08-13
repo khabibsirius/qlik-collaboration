@@ -18,7 +18,7 @@
 ┌────────────────────────────┐
 │  PostgreSQL 16             │   qlik_collaboration
 │  comments, users,          │
-│  attachments, mentions,    │
+│  attachments,              │
 │  notifications             │
 └────────────────────────────┘
 ```

@@ -210,7 +210,6 @@ Windows Service inject secrets without writing them to a file.
 | `Urls` | `ASPNETCORE_URLS` | listen address, e.g. `http://+:5000` |
 | `Storage:AttachmentsPath` | `Storage__AttachmentsPath` | where uploaded files are written |
 | `Cors:AllowedOrigins:0` | `Cors__AllowedOrigins__0` | allowed browser origin; `*` = any (dev only) |
-| `Notifications:BroadcastWhenNoMention` | `Notifications__BroadcastWhenNoMention` | notify the whole team when a comment has no @mention |
 | `Swagger:Enabled` | `Swagger__Enabled` | expose `/swagger` (keep off in production) |
 
 ---

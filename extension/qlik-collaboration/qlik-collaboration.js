@@ -12,7 +12,11 @@
  * broadcasts "commentsChanged" {appId, sheetId} and "notify" {username}.
  * Polling stays as a safety net (3s without SignalR, 30s with it).
  *
- * Etap 2: @mentions with autocomplete + notification bell.
+ * One shared discussion per sheet: there are no private messages and nothing is
+ * addressed at one person. Every comment is visible to everyone who opens the
+ * sheet and carries its author's name, and the bell reports every new comment
+ * from anyone — including the ones written on other sheets of the app.
+ *
  * Etap 3: file attachments; voice messages are audio attachments (MediaRecorder).
  */
 define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], function (qlik, $, signalR) {
@@ -22,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.6.0";
+  var EXT_VERSION = "0.7.0";
 
   function esc(text) {
     return String(text)
@@ -175,7 +179,6 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       self._lastPayload = "";
       self._attachTargets = [];
       self._pendingFiles = [];
-      self._users = [];
       self._notifs = [];
       self._live = false;
 
@@ -190,12 +193,12 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '    <span class="qcol-title" title="Qlik Collaboration v' + EXT_VERSION + '">Comments ' +
         '<span class="qcol-count"></span> <span class="qcol-ver">v' + EXT_VERSION + '</span></span>' +
         '    <span class="qcol-headright">' +
-        '      <span class="qcol-bell" title="Notifications">🔔<span class="qcol-badge" style="display:none"></span></span>' +
+        '      <span class="qcol-bell" title="New comments from the team">🔔<span class="qcol-badge" style="display:none"></span></span>' +
         '      <span class="qcol-conn" title="Backend connection">●</span>' +
         '    </span>' +
         '  </div>' +
         '  <div class="qcol-notifs" style="display:none">' +
-        '    <div class="qcol-notifs-head">Notifications <a href="#" class="qcol-markread">mark all read</a></div>' +
+        '    <div class="qcol-notifs-head">Team activity <a href="#" class="qcol-markread">mark all read</a></div>' +
         '    <div class="qcol-notifs-list"></div>' +
         '  </div>' +
         '  <div class="qcol-selections" title="Current selections (captured with your comment) - click to show what Qlik reports"></div>' +
@@ -221,8 +224,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '    <div class="qcol-attachchips"></div>' +
         '    <div class="qcol-pickhint" style="display:none">Click charts to attach/detach… (Esc or 🎯 to finish)</div>' +
         '    <label class="qcol-withsel"><input type="checkbox" class="qcol-selcheck" checked/> attach current selections</label>' +
-        '    <div class="qcol-mentionbox" style="display:none"></div>' +
-        '    <textarea class="qcol-input" placeholder="Write a comment… use @name to mention" rows="2"></textarea>' +
+        '    <textarea class="qcol-input" placeholder="Write a comment — everyone on the sheet will see it" rows="2"></textarea>' +
         '    <div class="qcol-pending"></div>' +
         '    <div class="qcol-toolbar">' +
         '      <button class="qcol-filebtn" title="Attach files">📎</button>' +
@@ -253,6 +255,20 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       self._applyMethod = (layout.collab && layout.collab.applyMethod) || "auto";
       self._authorDirectory = null;
 
+      // Announce whoever is reading, not only whoever writes. Comments notify every
+      // known user, so a colleague who has never posted would otherwise be outside
+      // that audience and see an empty bell until their first comment.
+      function registerMe(name, dir) {
+        var who = (name || "").trim();
+        if (!who || who === self._registeredAs) return;
+        self._registeredAs = who;
+        fetch(self._apiUrl + "/api/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: who, userDirectory: dir || null })
+        }).then(refreshNotifs).catch(function () { self._registeredAs = null; });
+      }
+
       function showManualIdentity() {
         self._authorDirectory = null;
         $element.find(".qcol-identity, .qcol-identity-wait").hide();
@@ -261,6 +277,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         $author.show().val(localStorage.getItem("qlikCollab.author") || "");
         self._lastPayload = "";
         refresh();
+        registerMe($author.val(), null);
         refreshNotifs();
       }
 
@@ -279,6 +296,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         // re-render: which comments are "mine" (delete link) depends on the identity
         self._lastPayload = "";
         refresh();
+        registerMe(uid, dir);
         refreshNotifs();
       }
 
@@ -713,65 +731,19 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         document.addEventListener("keydown", pickKey, true);
       });
 
-      // ---------- users & @mentions (Etap 2) ----------
+      // ---------- notifications ----------
+      // Every new comment notifies everyone but its author, so the bell is a feed of
+      // what the team is doing — across all sheets of the app, not just this one.
+      // 'mention'/'broadcast' are legacy kinds: rows written before @mentions were
+      // removed are still in the database and must keep rendering.
 
-      function refreshUsers() {
-        fetch(self._apiUrl + "/api/users")
-          .then(function (r) { return r.json(); })
-          .then(function (list) { self._users = list || []; })
-          .catch(function () {});
-      }
-
-      function highlightMentions(escapedBody) {
-        var out = escapedBody;
-        self._users.slice().sort(function (a, b) { return b.length - a.length; }).forEach(function (u) {
-          var pattern = ("@" + esc(u)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          out = out.replace(new RegExp(pattern, "gi"), function (m) {
-            return '<span class="qcol-mention">' + m + "</span>";
-          });
-        });
-        return out;
-      }
-
-      function updateMentionBox() {
-        var ta = $input[0];
-        var uptoCaret = ta.value.substring(0, ta.selectionStart);
-        var m = uptoCaret.match(/@([^\s@]*)$/);
-        var $box = $element.find(".qcol-mentionbox");
-        if (!m) { $box.hide(); return; }
-        var frag = m[1].toLowerCase();
-        var me = ($author.val() || "").trim().toLowerCase();
-        var matches = self._users.filter(function (u) {
-          return u.toLowerCase().indexOf(frag) === 0 && u.toLowerCase() !== me;
-        }).slice(0, 6);
-        if (!matches.length) { $box.hide(); return; }
-        $box.html(matches.map(function (u) {
-          return '<a href="#" class="qcol-mentionopt" data-u="' + esc(u) + '">@' + esc(u) + "</a>";
-        }).join("")).show();
-      }
-
-      $element.on("input", ".qcol-input", updateMentionBox);
-      $element.on("click", ".qcol-mentionopt", function (e) {
-        e.preventDefault();
-        var u = $(this).data("u");
-        var ta = $input[0];
-        var uptoCaret = ta.value.substring(0, ta.selectionStart);
-        var rest = ta.value.substring(ta.selectionStart);
-        var newUpto = uptoCaret.replace(/@([^\s@]*)$/, "@" + u + " ");
-        $input.val(newUpto + rest);
-        $element.find(".qcol-mentionbox").hide();
-        ta.focus();
-        ta.selectionStart = ta.selectionEnd = newUpto.length;
-      });
-
-      // ---------- notifications (Etap 2) ----------
-
-      var KIND_ICON = { mention: "@", reply: "↩", broadcast: "📢", status_change: "✎" };
+      var KIND_ICON = { comment: "💬", reply: "↩", status_change: "✎", mention: "@", broadcast: "📢" };
       var KIND_TEXT = {
-        mention: "mentioned you",
+        comment: "commented",
         reply: "replied to you",
-        broadcast: "commented",
-        status_change: "changed the status"
+        status_change: "changed the status",
+        mention: "mentioned you",
+        broadcast: "commented"
       };
 
       function refreshNotifs() {
@@ -905,7 +877,12 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           .then(refreshNotifs);
       });
 
-      $element.on("change", ".qcol-author", refreshNotifs);
+      // dev mode only: the Qlik identity cannot be typed, so this fires only when
+      // someone edits the manual name field
+      $element.on("change", ".qcol-author", function () {
+        registerMe($author.val(), null);
+        refreshNotifs();
+      });
 
       // ---------- attachments & voice (Etap 3) ----------
 
@@ -1037,7 +1014,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
                  (c.objectIds.length > 1 ? "×" + c.objectIds.length : "") + "</span>";
           }
           h += "</div>";
-          h += '<div class="qcol-body">' + highlightMentions(esc(c.body)) + "</div>";
+          h += '<div class="qcol-body">' + esc(c.body) + "</div>";
           h += renderAttachments(c);
           h += '<div class="qcol-actions">';
           if (c.selectionState && c.selectionState !== "null") {
@@ -1147,7 +1124,6 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           renderChips();
           renderPending();
           $element.find(".qcol-replybar").hide();
-          refreshUsers();
           refresh();
         }).catch(function () { /* connection dot already reflects errors */ });
       }
@@ -1543,7 +1519,6 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // ---------- start ----------
       self._tick = tick;          // re-paints reuse these when settings change
       self._pollMs = pollMs;
-      refreshUsers();
       tick();
       if (self._timer) clearInterval(self._timer);
       self._timer = setInterval(tick, pollMs);

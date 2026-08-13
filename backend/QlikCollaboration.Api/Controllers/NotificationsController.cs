@@ -15,7 +15,7 @@ public class NotificationsController : ControllerBase
     public class NotificationDto
     {
         public int Id { get; set; }
-        public string Kind { get; set; } = "";       // mention | reply | status_change
+        public string Kind { get; set; } = "";       // comment | reply | status_change
         public bool IsRead { get; set; }
         public DateTime CreatedAt { get; set; }
         public int CommentId { get; set; }

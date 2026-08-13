@@ -123,13 +123,15 @@ recommendation; the central node is the acceptable shortcut for a pilot.
 
 ## How the team experiences it
 
-- Open any sheet that has the panel → see the sheet's discussion.
-- Write comments, reply, @mention colleagues by AD name (autocomplete grows
-  automatically as people participate), attach files/voice, set statuses.
-- A mention/reply lights up the 🔔 with an unread badge the next time the
-  mentioned person has the panel open — instantly if they're online (SignalR).
-- A comment with **no** @mention notifies the whole team (`broadcast`), so news
-  about a dashboard is not missed by people who did not happen to open the sheet.
+- Open any sheet that has the panel → see the sheet's discussion. It is one shared
+  conversation: there are no private messages, everyone sees every comment, and
+  each one carries its author's AD name.
+- Write comments, reply, attach files/voice, set statuses.
+- **Every comment notifies the whole team** — the 🔔 gets an unread badge the next
+  time a colleague has the panel open, instantly if they are online (SignalR).
+  Nobody has to open a sheet to discover that something was said about it.
+- Opening the panel is enough to join that audience; a colleague who only reads
+  still gets notified, without having to post first.
 - **Clicking a notification opens the comment**: on the same sheet it scrolls to
   it and flashes it green; on another sheet Qlik navigates there and the panel
   highlights the comment on arrival. Opening a notification marks it read.
@@ -143,13 +145,12 @@ recommendation; the central node is the acceptable shortcut for a pilot.
 Found by an adversarial review of the code; each is a deliberate pilot-scope decision,
 not an unknown:
 
-1. **Notifications ignore Qlik's access rules.** A comment with no `@mention`
-   notifies every user in the `users` table, and the notification carries an 80-character
-   excerpt of the comment plus its app id — even to people who have no access to that
-   app or stream in Qlik. For a pilot inside one team this is fine; before opening the
-   module to several departments, the broadcast list must be filtered by who can
-   actually open the app (QRS API check, or scope the broadcast to users who have
-   already participated in that app).
+1. **Notifications ignore Qlik's access rules.** Every comment notifies every user in
+   the `users` table, and the notification carries an 80-character excerpt of the
+   comment plus its app id — even to people who have no access to that app or stream
+   in Qlik. For a pilot inside one team this is fine; before opening the module to
+   several departments, the audience must be filtered by who can actually open the app
+   (QRS API check, or scope it to users who have already participated in that app).
 2. **The API trusts `?user=` and the posted author name.** Anyone who can reach the
    API can read or clear another user's notifications, or post under another name.
    Only the panel UI is locked down. Closing this is the JWT item below.

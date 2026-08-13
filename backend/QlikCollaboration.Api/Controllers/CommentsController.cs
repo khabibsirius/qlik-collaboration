@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -22,17 +21,11 @@ public class CommentsController : ControllerBase
 
     private readonly NpgsqlDataSource _db;
     private readonly IHubContext<CommentsHub> _hub;
-    private readonly bool _broadcastWhenNoMention;
 
-    public CommentsController(NpgsqlDataSource db, IHubContext<CommentsHub> hub, IConfiguration config)
+    public CommentsController(NpgsqlDataSource db, IHubContext<CommentsHub> hub)
     {
         _db = db;
         _hub = hub;
-        // When a comment mentions nobody, notify the whole team (default on).
-        // Set Notifications:BroadcastWhenNoMention=false to keep notifications
-        // limited to @mentions and replies.
-        _broadcastWhenNoMention =
-            config.GetValue<bool?>("Notifications:BroadcastWhenNoMention") ?? true;
     }
 
     private Task Broadcast(string appId, string sheetId) =>
@@ -115,61 +108,29 @@ public class CommentsController : ControllerBase
                 "INSERT INTO comment_objects (comment_id, object_id) VALUES (@id, @objectId)",
                 objectIds.Select(o => new { id, objectId = o }), tx);
 
-        // Etap 2: @mentions — match "@username" against known users. Anchored on
-        // both sides: a plain Contains would let user "an" match "@anna" and let
-        // an e-mail address ("send to x@ivanov.com") count as a mention — which
-        // would also silently cancel the team broadcast below.
+        // Every comment goes to the whole team: there are no private messages and
+        // nothing is addressed at one person, so everyone except the author gets a
+        // notification. The only distinction is the kind — the author of the comment
+        // being replied to sees "replied to you" rather than "commented".
+        var parentAuthor = dto.ParentId is int parentId
+            ? await conn.ExecuteScalarAsync<string?>(
+                "SELECT author FROM comments WHERE id = @parentId", new { parentId }, tx)
+            : null;
+
         var usernames = (await conn.QueryAsync<string>("SELECT username FROM users", transaction: tx)).ToList();
-        var mentioned = usernames
-            .Where(u => !u.Equals(author, StringComparison.OrdinalIgnoreCase))
-            .Where(u => Regex.IsMatch(dto.Body,
-                                      @"(?<![\w@])@" + Regex.Escape(u) + @"(?![\w])",
-                                      RegexOptions.IgnoreCase,
-                                      TimeSpan.FromMilliseconds(200)))
-            .Distinct()
-            .ToList();
-
         var toNotify = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var u in mentioned)
+        foreach (var u in usernames)
         {
+            if (u.Equals(author, StringComparison.OrdinalIgnoreCase)) continue;
+            // Add() returns false when already queued — also collapses case-variant
+            // duplicates ("ivanov" / "Ivanov") into a single notification
+            if (!toNotify.Add(u)) continue;
+            var kind = parentAuthor is not null && u.Equals(parentAuthor, StringComparison.OrdinalIgnoreCase)
+                ? "reply"
+                : "comment";
             await conn.ExecuteAsync(
-                "INSERT INTO mentions (comment_id, mentioned_username) VALUES (@id, @u)", new { id, u }, tx);
-            await conn.ExecuteAsync(
-                "INSERT INTO notifications (username, comment_id, kind) VALUES (@u, @id, 'mention')", new { id, u }, tx);
-            toNotify.Add(u);
-        }
-
-        // reply → notify the parent comment's author (unless it's themselves or already mentioned)
-        if (dto.ParentId is int parentId)
-        {
-            var parentAuthor = await conn.ExecuteScalarAsync<string?>(
-                "SELECT author FROM comments WHERE id = @parentId", new { parentId }, tx);
-            if (parentAuthor is not null &&
-                !parentAuthor.Equals(author, StringComparison.OrdinalIgnoreCase) &&
-                !toNotify.Contains(parentAuthor))
-            {
-                await conn.ExecuteAsync(
-                    "INSERT INTO notifications (username, comment_id, kind) VALUES (@parentAuthor, @id, 'reply')",
-                    new { parentAuthor, id }, tx);
-                toNotify.Add(parentAuthor);
-            }
-        }
-
-        // No @mention → the comment is addressed to the whole team, so notify
-        // everyone else. Without this, a comment nobody was tagged in would reach
-        // nobody: people would have to open the sheet to discover it.
-        if (mentioned.Count == 0 && _broadcastWhenNoMention)
-        {
-            foreach (var u in usernames)
-            {
-                if (u.Equals(author, StringComparison.OrdinalIgnoreCase)) continue;
-                // Add() returns false when already notified — also collapses
-                // case-variant duplicates ("ivanov" / "Ivanov") into one notification
-                if (!toNotify.Add(u)) continue;
-                await conn.ExecuteAsync(
-                    "INSERT INTO notifications (username, comment_id, kind) VALUES (@u, @id, 'broadcast')",
-                    new { id, u }, tx);
-            }
+                "INSERT INTO notifications (username, comment_id, kind) VALUES (@u, @id, @kind)",
+                new { id, u, kind }, tx);
         }
 
         await tx.CommitAsync();

@@ -63,7 +63,10 @@ CREATE TABLE IF NOT EXISTS attachments (
     uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Etap 2: @mentions
+-- DEPRECATED. @mentions were removed: the discussion is a single shared thread,
+-- so every comment reaches the whole team and nothing is addressed at one person.
+-- The table is still created so existing databases and their rows stay valid;
+-- nothing writes to it any more, and it can be dropped once no history is needed.
 CREATE TABLE IF NOT EXISTS mentions (
     id                 SERIAL PRIMARY KEY,
     comment_id         INTEGER NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
@@ -71,12 +74,16 @@ CREATE TABLE IF NOT EXISTS mentions (
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Etap 2: notifications (in-app; email/Teams delivery handled by backend workers)
+-- Etap 2: notifications (in-app; email/Teams delivery handled by backend workers).
+-- One row per (recipient, comment): a new comment produces one for every known
+-- user except its author.
 CREATE TABLE IF NOT EXISTS notifications (
     id         SERIAL PRIMARY KEY,
     username   TEXT NOT NULL,
     comment_id INTEGER NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
-    kind       TEXT NOT NULL,             -- 'mention' | 'reply' | 'status_change'
+    -- 'comment' | 'reply' | 'status_change'
+    -- ('mention' and 'broadcast' appear in rows written before @mentions were removed)
+    kind       TEXT NOT NULL,
     is_read    BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
