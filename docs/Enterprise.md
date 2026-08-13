@@ -125,12 +125,16 @@ recommendation; the central node is the acceptable shortcut for a pilot.
 
 - The panel starts **collapsed to a 💬 bubble** carrying the unread count, and expands
   over the sheet when clicked, so a dashboard is not covered until someone asks for the
-  discussion. An extension cannot resize its own Qlik cell, so this only pays off if the
-  object is placed in a **small cell (about 60×60)** — the bubble is what lives in the
-  cell; the expanded panel floats above the sheet. "Panel display → Docked" in the
-  properties panel restores the old always-open behaviour, and the panel falls back to
-  docked by itself while a sheet is being edited, or on a client where `position: fixed`
-  is anchored to the cell rather than the window.
+  discussion. **Drag the bubble** to park it anywhere — beside the toolbar, in a corner —
+  and it stays there for that user. The expanded panel opens next to it, growing into
+  whichever side has room.
+- Both the bubble and the panel float above the sheet, so the object's own cell holds
+  nothing. Put it in a **small cell** out of the way; while the panel is floating the
+  extension makes that cell's white Qlik box transparent, so it does not show up as an
+  empty rectangle on the dashboard.
+- "Panel display → Docked" in the properties panel restores the old always-open
+  behaviour, and the panel falls back to docked by itself while a sheet is being edited,
+  or on a client where `position: fixed` is anchored to the cell rather than the window.
 - Open any sheet that has the panel → see the discussion you are entitled to. The
   **BI team** (`Team:Members` in the API's configuration) sees every thread on the
   sheet. **Everyone else** — the executives the dashboards are built for — sees only

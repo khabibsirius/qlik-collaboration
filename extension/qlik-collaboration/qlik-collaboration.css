@@ -591,11 +591,28 @@
    while the panel was open would otherwise leave the selections strip or a chip row
    stranded on the sheet next to the bubble. Scoped to :not(.qcol-expanded) so that
    once open, inline styles govern again exactly as they do when docked. */
+/* The bubble floats free of the cell too, not just the expanded panel. Left in the
+   cell it sat inside Qlik's white object box, which reads as a stray empty chart on
+   the sheet — the exact opposite of getting out of the way. JS sets left/top. */
 .qcol-bubbly:not(.qcol-expanded) {
   display: block;
-  height: auto;
+  position: fixed;
+  z-index: 2147482000;
+  width: 46px;
+  height: 46px;
   background: none;
   overflow: visible;
+}
+.qcol-bubbly:not(.qcol-expanded) .qcol-bubble { width: 100%; height: 100%; }
+.qcol-bubbly.qcol-dragging .qcol-bubble { cursor: grabbing; transform: none; }
+
+/* Qlik draws a white background and border around every object. While the panel is
+   floating, its cell is empty, so that box is an empty white rectangle on the sheet.
+   Applied to the object's own container chain only, and removed again on destroy. */
+.qcol-host-transparent {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
 }
 .qcol-bubbly:not(.qcol-expanded) > *:not(.qcol-bubble) { display: none !important; }
 .qcol-bubbly:not(.qcol-expanded) .qcol-bubble {
@@ -635,14 +652,12 @@
 
 /* expanded: out of the cell, over the sheet */
 .qcol-bubbly.qcol-expanded {
-  position: fixed;
-  right: 18px;
-  bottom: 18px;
+  position: fixed;              /* left/top come from JS, next to wherever the bubble is */
   z-index: 2147483000;          /* above Qlik's own chrome, below nothing that matters */
   width: 370px;
-  max-width: calc(100vw - 36px);
+  max-width: calc(100vw - 24px);
   height: 560px;
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - 90px);
   background: var(--qcol-bg);
   border: 1px solid var(--qcol-line);
   border-radius: 12px;

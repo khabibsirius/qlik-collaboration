@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.10.0";
+  var EXT_VERSION = "0.11.0";
 
   function esc(text) {
     return String(text)
@@ -1681,16 +1681,128 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         return self._canFloat;
       }
 
+      // ---- where the bubble sits ----
+      // Dragged by the user and remembered, rather than a corner chosen here. Qlik's
+      // own chrome is a different height on Desktop and Enterprise and moves between
+      // versions, so any hard-coded offset is wrong somewhere; letting people park it
+      // in the gap they actually have is both simpler and always right.
+
+      var BUBBLE = 46, EDGE = 12;
+
+      function defaultPos() {
+        // top right, below the toolbar — visible without covering Qlik's buttons
+        return { left: Math.max(EDGE, window.innerWidth - BUBBLE - 16), top: 140 };
+      }
+
+      function loadPos() {
+        try {
+          var raw = localStorage.getItem("qlikCollab.bubblePos");
+          var p = raw ? JSON.parse(raw) : null;
+          if (p && isFinite(p.left) && isFinite(p.top)) return p;
+        } catch (e) { /* fall through */ }
+        return defaultPos();
+      }
+
+      function clamp(p) {
+        var maxLeft = Math.max(EDGE, window.innerWidth - BUBBLE - EDGE);
+        var maxTop = Math.max(EDGE, window.innerHeight - BUBBLE - EDGE);
+        return {
+          left: Math.min(Math.max(p.left, EDGE), maxLeft),
+          top: Math.min(Math.max(p.top, EDGE), maxTop)
+        };
+      }
+
+      self._bubblePos = clamp(loadPos());
+
+      function placeBubble() {
+        var p = self._bubblePos;
+        $panel.css({ left: p.left + "px", top: p.top + "px" });
+      }
+
+      // Open next to the bubble, growing into whichever side has room, so the panel
+      // never appears somewhere unrelated to the button that was just clicked.
+      function placePanel() {
+        var p = self._bubblePos;
+        var w = Math.min(370, window.innerWidth - 2 * EDGE);
+        var h = Math.min(560, window.innerHeight - 2 * EDGE);
+        var left = (p.left + BUBBLE / 2 > window.innerWidth / 2) ? p.left + BUBBLE - w : p.left;
+        var top = (p.top + BUBBLE / 2 > window.innerHeight / 2) ? p.top + BUBBLE - h : p.top;
+        $panel.css({
+          left: Math.min(Math.max(left, EDGE), Math.max(EDGE, window.innerWidth - w - EDGE)) + "px",
+          top: Math.min(Math.max(top, EDGE), Math.max(EDGE, window.innerHeight - h - EDGE)) + "px"
+        });
+      }
+
+      // Qlik's own object box would otherwise sit on the sheet as an empty white
+      // rectangle once the panel has floated out of it. Bounded walk up the object's
+      // container chain, marked with a class so it is exactly reversible.
+      function styleHostCell(transparent) {
+        var node = $element[0];
+        for (var i = 0; node && i < 4; i++) {
+          node.classList.toggle("qcol-host-transparent", transparent);
+          if (/qv-gridcell|qv-object(?!-)/.test(node.className || "")) break;
+          node = node.parentElement;
+        }
+      }
+      self._styleHostCell = styleHostCell;
+
       function applyDisplayMode() {
         var bubble = bubbleWanted() && canFloat();
         $panel.toggleClass("qcol-bubbly", bubble);
+        styleHostCell(bubble);
         if (!bubble) {
-          $panel.removeClass("qcol-expanded");
+          $panel.removeClass("qcol-expanded").css({ left: "", top: "" });
           return;
         }
         $panel.toggleClass("qcol-expanded", !!self._expanded);
+        if (self._expanded) placePanel(); else placeBubble();
       }
       self._applyDisplayMode = applyDisplayMode;
+
+      // ---- drag the bubble ----
+      // A press that never really moves is a click; anything past a few pixels is a
+      // drag. Without that distinction the bubble either cannot be moved or cannot be
+      // opened, depending on which handler wins.
+      $element.on("mousedown", ".qcol-bubble", function (e) {
+        if (e.button !== 0 || self._expanded) return;
+        e.preventDefault();
+        var startX = e.clientX, startY = e.clientY;
+        var origin = self._bubblePos;
+        var moved = false;
+
+        function onMove(ev) {
+          var dx = ev.clientX - startX, dy = ev.clientY - startY;
+          if (!moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+          moved = true;
+          $panel.addClass("qcol-dragging");
+          self._bubblePos = clamp({ left: origin.left + dx, top: origin.top + dy });
+          placeBubble();
+        }
+
+        function onUp() {
+          document.removeEventListener("mousemove", onMove, true);
+          document.removeEventListener("mouseup", onUp, true);
+          $panel.removeClass("qcol-dragging");
+          if (moved) {
+            try {
+              localStorage.setItem("qlikCollab.bubblePos", JSON.stringify(self._bubblePos));
+            } catch (e2) { /* private mode — it just will not be remembered */ }
+          } else {
+            setExpanded(true);
+          }
+        }
+
+        document.addEventListener("mousemove", onMove, true);
+        document.addEventListener("mouseup", onUp, true);
+      });
+
+      // A window that shrank could otherwise leave the bubble parked off-screen with
+      // no way to reach it.
+      self._onWindowResize = function () {
+        self._bubblePos = clamp(self._bubblePos);
+        if (self._expanded) placePanel(); else placeBubble();
+      };
+      window.addEventListener("resize", self._onWindowResize);
 
       function setExpanded(open) {
         self._expanded = open;
@@ -1709,10 +1821,8 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       try { self._expanded = localStorage.getItem("qlikCollab.expanded") === "1"; }
       catch (e) { self._expanded = false; }
 
-      $element.on("click", ".qcol-bubble", function (e) {
-        e.preventDefault();
-        setExpanded(true);
-      });
+      // No click handler on the bubble: mousedown above decides between opening and
+      // dragging, and a click would fire on mouseup after a drag and reopen it.
       $element.on("click", ".qcol-collapse", function (e) {
         e.preventDefault();
         setExpanded(false);
@@ -1773,6 +1883,14 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       if (this._selTimer) clearInterval(this._selTimer);
       if (this._resizeObserver) {
         try { this._resizeObserver.disconnect(); } catch (e) { /* noop */ }
+      }
+      if (this._onWindowResize) {
+        window.removeEventListener("resize", this._onWindowResize);
+      }
+      // Hand Qlik's own DOM back exactly as it was found — these classes sit on the
+      // object's container, which outlives this extension when the sheet changes.
+      if (this._styleHostCell) {
+        try { this._styleHostCell(false); } catch (e) { /* noop */ }
       }
       if (this._stopPicking) this._stopPicking();
       if (this._stopRecording) this._stopRecording();
