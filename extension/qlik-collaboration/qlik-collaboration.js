@@ -153,6 +153,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       var app = qlik.currApp(this);
       var apiUrl = (layout.collab && layout.collab.apiUrl) || "http://localhost:5000";
       var pollMs = ((layout.collab && layout.collab.pollSeconds) || 3) * 1000;
+      var identityMode = (layout.collab && layout.collab.identityMode) || "auto";
 
       // Build the UI once; later paints only re-apply changed settings.
       // (Qlik re-paints on resize and after every property-panel edit, so this
@@ -251,7 +252,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       //   manual — typed name (development only)
       // kept on `self` (not a closure var) so a property-panel change during a
       // later paint is picked up by the resolver below
-      self._identityMode = (layout.collab && layout.collab.identityMode) || "auto";
+      self._identityMode = identityMode;
       self._applyMethod = (layout.collab && layout.collab.applyMethod) || "auto";
       self._authorDirectory = null;
 
