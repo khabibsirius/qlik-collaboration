@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.7.0";
+  var EXT_VERSION = "0.8.0";
 
   function esc(text) {
     return String(text)
@@ -170,6 +170,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           if (self._timer) clearInterval(self._timer);
           self._timer = setInterval(self._tick, self._live ? 30000 : pollMs);
         }
+        // Qlik repaints on resize, so this keeps the size buckets right even on a
+        // client with no ResizeObserver.
+        if (self._applySize) self._applySize();
         return qlik.Promise.resolve();
       }
       self._built = true;
@@ -194,6 +197,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '    <span class="qcol-title" title="Qlik Collaboration v' + EXT_VERSION + '">Comments ' +
         '<span class="qcol-count"></span> <span class="qcol-ver">v' + EXT_VERSION + '</span></span>' +
         '    <span class="qcol-headright">' +
+        '      <span class="qcol-me" style="display:none">' +
+        '        <span class="qcol-me-avatar"></span><span class="qcol-me-name"></span>' +
+        '      </span>' +
         '      <span class="qcol-bell" title="New comments from the team">🔔<span class="qcol-badge" style="display:none"></span></span>' +
         '      <span class="qcol-conn" title="Backend connection">●</span>' +
         '    </span>' +
@@ -202,32 +208,32 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '    <div class="qcol-notifs-head">Team activity <a href="#" class="qcol-markread">mark all read</a></div>' +
         '    <div class="qcol-notifs-list"></div>' +
         '  </div>' +
-        '  <div class="qcol-selections" title="Current selections (captured with your comment) - click to show what Qlik reports"></div>' +
+        '  <div class="qcol-selections" style="display:none" title="Current selections (captured with your comment) - click to show what Qlik reports"></div>' +
         '  <pre class="qcol-debug" style="display:none"></pre>' +
-        '  <div class="qcol-list"></div>' +
-        '  <div class="qcol-toast" style="display:none"></div>' +
+        '  <div class="qcol-main">' +
+        '    <div class="qcol-list"></div>' +
+        '    <div class="qcol-toast" style="display:none"></div>' +
+        '  </div>' +
         '  <div class="qcol-compose">' +
         '    <div class="qcol-replybar" style="display:none">' +
         '      Replying to <b class="qcol-replyname"></b>' +
         '      <a href="#" class="qcol-cancelreply">×</a>' +
         '    </div>' +
-        '    <div class="qcol-identity" style="display:none">' +
-        '      <span class="qcol-identity-avatar"></span>' +
-        '      <span class="qcol-identity-name"></span>' +
-        '      <span class="qcol-identity-lock" title="Signed in through Qlik Sense — this name cannot be changed">🔒</span>' +
-        '    </div>' +
         '    <div class="qcol-identity-wait" style="display:none">Identifying you through Qlik Sense…</div>' +
         '    <input class="qcol-author" type="text" placeholder="Your name" maxlength="60"/>' +
-        '    <div class="qcol-attachrow">' +
-        '      <select class="qcol-attach"><option value="">＋ attach chart…</option></select>' +
-        '      <button class="qcol-pick" title="Click charts on the sheet to attach the comment to them">🎯</button>' +
+        '    <div class="qcol-extras" style="display:none">' +
+        '      <div class="qcol-attachrow">' +
+        '        <select class="qcol-attach"><option value="">attach to a chart…</option></select>' +
+        '        <button class="qcol-pick" title="Click charts on the sheet to attach the comment to them">🎯</button>' +
+        '      </div>' +
+        '      <label class="qcol-withsel"><input type="checkbox" class="qcol-selcheck" checked/> attach current selections</label>' +
         '    </div>' +
-        '    <div class="qcol-attachchips"></div>' +
+        '    <div class="qcol-attachchips" style="display:none"></div>' +
         '    <div class="qcol-pickhint" style="display:none">Click charts to attach/detach… (Esc or 🎯 to finish)</div>' +
-        '    <label class="qcol-withsel"><input type="checkbox" class="qcol-selcheck" checked/> attach current selections</label>' +
-        '    <textarea class="qcol-input" placeholder="Write a comment — everyone on the sheet will see it" rows="2"></textarea>' +
+        '    <textarea class="qcol-input" placeholder="Write a comment — everyone sees it" rows="1"></textarea>' +
         '    <div class="qcol-pending"></div>' +
         '    <div class="qcol-toolbar">' +
+        '      <button class="qcol-more" title="Attach the comment to charts or to the current selections">＋</button>' +
         '      <button class="qcol-filebtn" title="Attach files">📎</button>' +
         '      <button class="qcol-voice" title="Record a voice message">🎤</button>' +
         '      <input type="file" class="qcol-file" multiple style="display:none"/>' +
@@ -272,7 +278,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       function showManualIdentity() {
         self._authorDirectory = null;
-        $element.find(".qcol-identity, .qcol-identity-wait").hide();
+        $element.find(".qcol-me, .qcol-identity-wait").hide();
         $element.find(".qcol-identity-wait").removeClass("qcol-identity-error");
         $element.find(".qcol-send").prop("disabled", false);
         $author.show().val(localStorage.getItem("qlikCollab.author") || "");
@@ -287,12 +293,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         $author.val(uid).hide();
         $element.find(".qcol-send").prop("disabled", false);
         $element.find(".qcol-identity-wait").hide().removeClass("qcol-identity-error");
-        $element.find(".qcol-identity-avatar")
+        $element.find(".qcol-me-avatar")
           .text(initials(uid))
           .css("background", avatarColor(uid));
-        $element.find(".qcol-identity-name").text(uid);
-        $element.find(".qcol-identity")
-          .attr("title", "Signed in through Qlik Sense as " + (dir ? dir + "\\" : "") + uid)
+        $element.find(".qcol-me-name").text(uid);
+        $element.find(".qcol-me")
+          .attr("title", "Signed in through Qlik Sense as " + (dir ? dir + "\\" : "") +
+                         uid + " — this name cannot be changed")
           .css("display", "flex");
         // re-render: which comments are "mine" (delete link) depends on the identity
         self._lastPayload = "";
@@ -303,7 +310,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       function identityBlocked(msg) {
         $author.hide();
-        $element.find(".qcol-identity").hide();
+        $element.find(".qcol-me").hide();
         $element.find(".qcol-identity-wait").text("⚠ " + msg).addClass("qcol-identity-error").show();
         $element.find(".qcol-send").prop("disabled", true);
       }
@@ -378,7 +385,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           showManualIdentity();
         } else {
           $author.hide();
-          $element.find(".qcol-identity").hide();
+          $element.find(".qcol-me").hide();
           $element.find(".qcol-identity-wait")
             .removeClass("qcol-identity-error")
             .text("Identifying you through Qlik Sense…")
@@ -461,10 +468,12 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       function renderSelections(sels) {
         var $box = $element.find(".qcol-selections");
+        // An always-present "No selections" row spent a permanent 35px saying that
+        // nothing had happened. When there is nothing to report, report nothing.
         if (!sels.length) {
-          $box.html('<span class="qcol-nosel">No selections</span>');
+          $box.empty().hide();
         } else {
-          $box.html(sels.map(function (s) {
+          $box.show().html(sels.map(function (s) {
             if (s.unsupportedRange) {
               return '<span class="qcol-chip qcol-chip-range" title="Qlik reports a range selection here, which has no individual values to save or replay. Select the values instead (e.g. in a filter pane) to attach them.">' +
                      esc(s.field) + ": range (cannot be saved)</span>";
@@ -532,11 +541,13 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       function renderChips() {
         var $box = $element.find(".qcol-attachchips");
+        // "Whole sheet" is the default and needs no chip to announce it — the chips
+        // only appear once the comment is actually pinned to something.
         if (!self._attachTargets.length) {
-          $box.html('<span class="qcol-chip qcol-chip-sheet">📄 Whole sheet</span>');
+          $box.empty().hide();
           return;
         }
-        $box.html(self._attachTargets.map(function (id) {
+        $box.show().html(self._attachTargets.map(function (id) {
           return '<span class="qcol-chip qcol-chip-obj">📊 ' + esc(objLabel(id)) +
                  ' <a href="#" class="qcol-chip-x" data-id="' + esc(id) + '">×</a></span>';
         }).join(" "));
@@ -732,6 +743,29 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         document.addEventListener("keydown", pickKey, true);
       });
 
+      // ---------- composer behaviour ----------
+
+      // Pinning a comment to a chart is occasional. A permanently visible dropdown,
+      // picker button and checkbox charged every sheet ~57px for the times it is not.
+      $element.on("click", ".qcol-more", function (e) {
+        e.preventDefault();
+        var $extras = $element.find(".qcol-extras");
+        $extras.toggle();
+        $(this).toggleClass("qcol-open", $extras.is(":visible"));
+      });
+
+      // Grow the box to the text instead of reserving two rows in advance. The cap
+      // comes from the stylesheet so the shorter limit under .qcol-short applies too.
+      function autoGrow() {
+        var ta = $input[0];
+        if (!ta) return;
+        ta.style.height = "auto";
+        var max = parseFloat(window.getComputedStyle(ta).maxHeight);
+        ta.style.height = Math.min(ta.scrollHeight, isFinite(max) ? max : 108) + "px";
+      }
+      self._autoGrow = autoGrow;
+      $element.on("input", ".qcol-input", autoGrow);
+
       // ---------- notifications ----------
       // Every new comment notifies everyone but its author, so the bell is a feed of
       // what the team is doing — across all sheets of the app, not just this one.
@@ -889,8 +923,8 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       function renderPending() {
         var $box = $element.find(".qcol-pending");
-        if (!self._pendingFiles.length) { $box.empty(); return; }
-        $box.html(self._pendingFiles.map(function (f, i) {
+        if (!self._pendingFiles.length) { $box.empty().hide(); return; }
+        $box.show().html(self._pendingFiles.map(function (f, i) {
           var icon = /\.webm$|\.ogg$|\.mp3$|\.m4a$|\.wav$/i.test(f.name) ? "🎤" : "📄";
           return '<span class="qcol-chip qcol-chip-file">' + icon + " " + esc(f.name) +
                  ' <a href="#" class="qcol-pending-x" data-i="' + i + '">×</a></span>';
@@ -926,11 +960,16 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
       self._stopRecording = stopRecording;
 
+      // The pending strip is hidden while empty, so an error posted into it has to
+      // reveal it — and hide it again afterwards if no files are queued behind it.
       function voiceError(msg) {
         var $box = $element.find(".qcol-pending");
         $box.find(".qcol-voicerr").remove();
-        $box.append('<span class="qcol-chip qcol-voicerr">⚠ ' + esc(msg) + "</span>");
-        setTimeout(function () { $box.find(".qcol-voicerr").remove(); }, 6000);
+        $box.show().append('<span class="qcol-chip qcol-voicerr">⚠ ' + esc(msg) + "</span>");
+        setTimeout(function () {
+          $box.find(".qcol-voicerr").remove();
+          renderPending();
+        }, 6000);
       }
 
       function startRecording() {
@@ -1135,6 +1174,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           return uploadPending(created.id);
         }).then(function () {
           $input.val("");
+          autoGrow();                 // collapse back to one row
           self._replyTo = null;
           self._attachTargets = [];
           self._pendingFiles = [];
@@ -1540,6 +1580,37 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         } catch (err) { /* signalR lib unavailable — polling continues */ }
       }
 
+      // ---------- size adaptation ----------
+      // A Qlik object is resized by dragging its cell, so the viewport never changes
+      // and media queries never fire for it. Watch the element itself instead, and
+      // give way on chrome rather than on type size — the complaint that started this
+      // was "hard to see", so shrinking the text would have made it worse.
+
+      function applySize() {
+        var w = $element.width() || 0;
+        var h = $element.height() || 0;
+        var narrow = w > 0 && w < 280;
+        var short = h > 0 && h < 340;
+        var sig = (narrow ? "n" : "") + (short ? "s" : "");
+        // Writing to the DOM from inside a resize callback can feed itself; only
+        // touch it when the bucket actually changed.
+        if (sig === self._sizeSig) return;
+        self._sizeSig = sig;
+        $element.find(".qcol-panel")
+          .toggleClass("qcol-narrow", narrow)
+          .toggleClass("qcol-short", short);
+        autoGrow();                 // the composer's max height differs per bucket
+      }
+      self._applySize = applySize;
+
+      if (typeof ResizeObserver === "function") {
+        try {
+          self._resizeObserver = new ResizeObserver(applySize);
+          self._resizeObserver.observe($element[0]);
+        } catch (e) { /* older client — Qlik's own repaint-on-resize covers it */ }
+      }
+      applySize();
+
       // ---------- start ----------
       self._tick = tick;          // re-paints reuse these when settings change
       self._pollMs = pollMs;
@@ -1554,6 +1625,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
     beforeDestroy: function () {
       if (this._timer) clearInterval(this._timer);
       if (this._selTimer) clearInterval(this._selTimer);
+      if (this._resizeObserver) {
+        try { this._resizeObserver.disconnect(); } catch (e) { /* noop */ }
+      }
       if (this._stopPicking) this._stopPicking();
       if (this._stopRecording) this._stopRecording();
       if (this._connection) {

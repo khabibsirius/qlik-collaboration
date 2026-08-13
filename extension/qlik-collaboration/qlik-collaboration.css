@@ -1,11 +1,16 @@
 /* ============================================================
    Qlik Collaboration — comments panel
-   Design language: simple & premium. Soft cards, generous
-   spacing, colored avatars, Qlik green (#009845) used sparingly.
+
+   Design rule: nothing permanent that carries no information.
+   Rows that used to sit there empty — "No selections", "Whole
+   sheet", the attach dropdown, the identity card — are either
+   hidden until they say something or folded into the ＋ drawer.
+   That is where the space comes from, NOT from smaller type:
+   the panel lives in a sheet cell, so text stays readable and
+   the chrome gives way instead.
    ============================================================ */
 
 .qcol-panel {
-  position: relative;   /* anchors the toast */
   --qcol-green: #009845;
   --qcol-green-dark: #007d39;
   --qcol-ink: #1f2937;
@@ -18,12 +23,17 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
   font-family: "Segoe UI", -apple-system, "QlikView Sans", "Source Sans Pro", Arial, sans-serif;
   font-size: 12.5px;
   color: var(--qcol-ink);
   background: var(--qcol-bg);
-  border-left: 1px solid var(--qcol-line);
+  /* the panel lives in a sheet cell it must never widen: anything too long
+     truncates or wraps inside rather than pushing the object out */
+  overflow: hidden;
 }
+
+.qcol-panel button { font-family: inherit; }
 
 /* ---------- header ---------- */
 
@@ -31,32 +41,74 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
+  gap: 8px;
+  padding: 6px 10px;
   background: var(--qcol-card);
   border-bottom: 1px solid var(--qcol-line);
 }
-.qcol-title { font-size: 14.5px; font-weight: 600; letter-spacing: .1px; }
-.qcol-count { color: var(--qcol-faint); font-weight: 400; font-size: 12.5px; }
-.qcol-ver { color: var(--qcol-faint); font-weight: 400; font-size: 9.5px; opacity: .7; }
-.qcol-headright { display: flex; align-items: center; gap: 10px; }
+/* The title yields first: at narrow widths the identity, bell and status dot are
+   worth more than the word "Comments", so it ellipsises instead of shoving them
+   off the edge. */
+.qcol-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.qcol-count { color: var(--qcol-faint); font-weight: 400; }
+/* deploys are verified against this: browsers cache extension files hard, so the
+   running build has to be readable from the panel itself */
+.qcol-ver { color: var(--qcol-faint); font-weight: 400; font-size: 9px; opacity: .7; }
+.qcol-headright { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; min-width: 0; }
+
+/* who you are: a header chip, not a card above the composer */
+.qcol-me {
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 130px;
+  cursor: default;
+}
+.qcol-me-avatar {
+  flex: none;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 8.5px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 19px;
+  user-select: none;
+}
+.qcol-me-name {
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--qcol-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .qcol-conn { color: #d1d5db; font-size: 9px; transition: color .3s; }
 .qcol-conn.qcol-ok { color: var(--qcol-green); }
 .qcol-conn.qcol-err { color: #dc2626; }
 .qcol-conn.qcol-live { text-shadow: 0 0 5px rgba(0, 152, 69, .6); }
 
-/* notification bell */
 .qcol-bell {
   cursor: pointer;
   position: relative;
-  font-size: 14px;
+  font-size: 13px;
   opacity: .75;
   transition: opacity .15s;
 }
 .qcol-bell:hover { opacity: 1; }
 .qcol-badge {
   position: absolute;
-  top: -6px; right: -9px;
+  top: -5px; right: -8px;
   background: #dc2626;
   color: #fff;
   border-radius: 9px;
@@ -68,17 +120,18 @@
   box-shadow: 0 0 0 2px var(--qcol-card);
 }
 
+/* ---------- notifications drop-down ---------- */
+
 .qcol-notifs {
   background: var(--qcol-card);
   border-bottom: 1px solid var(--qcol-line);
-  max-height: 190px;
+  max-height: 45%;
   overflow-y: auto;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, .04);
 }
 .qcol-notifs-head {
-  padding: 8px 14px 6px;
+  padding: 6px 10px 4px;
   font-weight: 600;
-  font-size: 12px;
+  font-size: 10.5px;
   color: var(--qcol-muted);
   text-transform: uppercase;
   letter-spacing: .5px;
@@ -97,23 +150,16 @@
   display: flex;
   align-items: baseline;
   gap: 6px;
-  padding: 7px 14px;
+  padding: 5px 10px;
   color: var(--qcol-muted);
-  font-size: 12px;
+  font-size: 11.5px;
   cursor: pointer;
-  border-left: 3px solid transparent;
-  transition: background .12s, border-color .12s;
+  border-left: 2px solid transparent;
 }
 .qcol-notif:hover { background: #f4f6f8; border-left-color: var(--qcol-green); }
 .qcol-notif-unread { background: #f0faf4; color: var(--qcol-ink); }
 .qcol-notif-unread:hover { background: #e6f6ec; }
-.qcol-notif-kind {
-  flex: none;
-  width: 15px;
-  color: var(--qcol-green);
-  font-weight: 700;
-  text-align: center;
-}
+.qcol-notif-kind { flex: none; width: 14px; text-align: center; }
 .qcol-notif-text {
   flex: 1;
   min-width: 0;
@@ -124,71 +170,24 @@
 .qcol-notif-time { flex: none; color: var(--qcol-faint); font-size: 10px; }
 .qcol-notif-away { flex: none; color: var(--qcol-green); font-size: 11px; }
 
-/* ---------- signed-in identity (Enterprise) ---------- */
-
-.qcol-identity {
-  align-items: center;
-  gap: 8px;
-  background: #f4f6f8;
-  border: 1px solid var(--qcol-line);
-  border-radius: 7px;
-  padding: 5px 9px;
-  margin-bottom: 6px;
-}
-.qcol-identity-avatar {
-  flex: none;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  color: #fff;
-  font-size: 9px;
-  font-weight: 600;
-  text-align: center;
-  line-height: 22px;
-}
-.qcol-identity-name {
-  flex: 1;
-  min-width: 0;
-  font-weight: 600;
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.qcol-identity-lock { flex: none; font-size: 10px; opacity: .5; }
-
-.qcol-identity-wait {
-  background: #f4f6f8;
-  border: 1px solid var(--qcol-line);
-  border-radius: 7px;
-  padding: 5px 9px;
-  margin-bottom: 6px;
-  color: var(--qcol-faint);
-  font-size: 11.5px;
-}
-.qcol-identity-error {
-  background: #fdecec;
-  border-color: #f5c2c2;
-  color: #c02626;
-}
-
-/* ---------- current selections strip ---------- */
+/* ---------- current selections strip ----------
+   Hidden entirely when nothing is selected: an empty "No selections" row cost a
+   permanent 35px to say nothing. */
 
 .qcol-selections {
-  padding: 7px 14px;
+  padding: 4px 10px;
   background: var(--qcol-card);
   border-bottom: 1px solid var(--qcol-line);
-  min-height: 20px;
-  line-height: 21px;
+  cursor: pointer;
+  line-height: 19px;
+  max-height: 58px;
+  overflow-y: auto;
 }
-.qcol-nosel { color: var(--qcol-faint); font-size: 11.5px; }
-.qcol-selections { cursor: pointer; }
 
-/* diagnostic dump of what Qlik reports (click the selections strip) */
 .qcol-debug {
   margin: 0;
-  padding: 8px 12px;
-  max-height: 220px;
+  padding: 6px 10px;
+  max-height: 180px;
   overflow: auto;
   background: #1f2937;
   color: #d1fae5;
@@ -199,25 +198,35 @@
   word-break: break-word;
 }
 
-.qcol-chip-range { background: #fef3e2; color: #b26a00; }
-
 .qcol-chip {
   display: inline-block;
   background: #eef2f6;
   border-radius: 20px;
-  padding: 1px 9px;
+  padding: 1px 8px;
   margin: 1px 2px 1px 0;
   color: #3b5872;
   font-size: 11px;
 }
+.qcol-chip-range { background: #fef3e2; color: #b26a00; }
 
-/* ---------- comments list ---------- */
+/* ---------- main area (list + toast) ----------
+   The toast is anchored here rather than to the panel, so it always sits just
+   above the composer no matter how tall the composer has grown. */
+
+.qcol-main {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 
 .qcol-list {
   position: relative;   /* offset parent for scroll-to-comment maths */
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 12px 12px 6px;
+  padding: 8px 8px 4px;
   scrollbar-width: thin;
 }
 .qcol-list::-webkit-scrollbar { width: 6px; }
@@ -226,15 +235,13 @@
 .qcol-empty {
   color: var(--qcol-faint);
   text-align: center;
-  margin-top: 40px;
-  font-size: 12.5px;
+  margin-top: 24px;
   line-height: 1.7;
 }
 
-/* day separator */
 .qcol-day {
   text-align: center;
-  margin: 10px 0 12px;
+  margin: 6px 0 8px;
   position: relative;
 }
 .qcol-day::before {
@@ -246,41 +253,39 @@
 .qcol-day span {
   position: relative;
   background: var(--qcol-bg);
-  padding: 0 10px;
+  padding: 0 8px;
   color: var(--qcol-faint);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 10.5px;
 }
 
-/* message row: avatar + card */
+/* ---------- messages ----------
+   Flat: no per-message border or shadow. Cards stacked a lot of visual weight
+   in a narrow column; the avatar already separates one message from the next. */
+
 .qcol-item {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 7px;
+  margin-bottom: 7px;
   animation: qcol-in .18s ease-out;
 }
 @keyframes qcol-in {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(3px); }
   to   { opacity: 1; transform: none; }
 }
-.qcol-reply {
-  margin-left: 26px;
-  margin-top: -4px;
-}
-.qcol-reply .qcol-avatar { width: 22px; height: 22px; font-size: 9px; line-height: 22px; }
+.qcol-reply { margin-left: 20px; }
+.qcol-reply .qcol-avatar { width: 20px; height: 20px; font-size: 8.5px; line-height: 20px; }
 
 .qcol-avatar {
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   color: #fff;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   text-align: center;
-  line-height: 28px;
-  letter-spacing: .3px;
+  line-height: 26px;
   user-select: none;
 }
 
@@ -288,32 +293,28 @@
   flex: 1;
   min-width: 0;
   background: var(--qcol-card);
-  border: 1px solid var(--qcol-line);
-  border-radius: 10px;
-  padding: 8px 11px 6px;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+  border-radius: 8px;
+  padding: 5px 9px 4px;
 }
 
 .qcol-meta {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin-bottom: 3px;
-  min-height: 16px;
+  gap: 6px;
+  min-height: 15px;
 }
-.qcol-meta b { font-size: 12.5px; font-weight: 600; }
-.qcol-time { color: var(--qcol-faint); font-size: 10.5px; }
+.qcol-meta b { font-size: 12px; font-weight: 600; }
+.qcol-time { color: var(--qcol-faint); font-size: 10px; }
 
 .qcol-status {
   cursor: pointer;
   border-radius: 10px;
-  padding: 1px 8px;
-  font-size: 9.5px;
+  padding: 0 7px;
+  font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .4px;
   margin-left: auto;
-  transition: filter .15s;
 }
 .qcol-status:hover { filter: brightness(.94); }
 .qcol-status-new         { background: #e8f0fe; color: #1a5dc8; }
@@ -326,49 +327,49 @@
   font-size: 11px;
   color: var(--qcol-muted);
   border-radius: 10px;
-  padding: 0 5px;
-  transition: background .12s, color .12s;
+  padding: 0 4px;
 }
 .qcol-objtag:hover { background: #e6f6ec; color: #1e7e40; }
 
 .qcol-body {
   white-space: pre-wrap;
   word-break: break-word;
-  margin: 1px 0 3px;
-  line-height: 1.55;
+  line-height: 1.5;
 }
 
-/* attachments on comments */
-.qcol-atts { margin: 4px 0 4px; }
+.qcol-atts { margin: 3px 0; }
 .qcol-att-img {
   max-width: 100%;
-  max-height: 140px;
-  border-radius: 8px;
+  max-height: 130px;
+  border-radius: 6px;
   border: 1px solid var(--qcol-line);
   display: block;
   margin: 3px 0;
 }
-.qcol-att-audio { width: 100%; height: 30px; margin: 3px 0; }
+.qcol-att-audio { width: 100%; height: 28px; margin: 3px 0; }
 .qcol-att-file {
   display: block;
   color: #2563ab;
   text-decoration: none;
-  margin: 3px 0;
+  margin: 2px 0;
   font-size: 12px;
 }
 .qcol-att-file:hover { text-decoration: underline; }
 .qcol-att-file span { color: var(--qcol-faint); }
 
-/* actions: appear on hover (premium restraint) */
+/* Actions reveal on hover so they cost no height when idle. Touch and keyboard
+   have no hover, so focus-within reveals them too. */
 .qcol-actions {
-  height: 16px;
+  height: 0;
+  overflow: hidden;
   opacity: 0;
   transition: opacity .15s;
 }
-.qcol-msg:hover .qcol-actions { opacity: 1; }
+.qcol-msg:hover .qcol-actions,
+.qcol-msg:focus-within .qcol-actions { height: auto; opacity: 1; }
 .qcol-actions a {
   color: var(--qcol-muted);
-  margin-right: 12px;
+  margin-right: 10px;
   text-decoration: none;
   font-size: 11px;
 }
@@ -376,51 +377,41 @@
 .qcol-applysel { color: var(--qcol-green) !important; font-weight: 500; }
 .qcol-delete:hover { color: #dc2626 !important; }
 
-/* comment highlight when arrived at from a notification */
-.qcol-flash {
-  animation: qcol-flash 2.2s ease-out;
-}
+.qcol-flash { animation: qcol-flash 2.2s ease-out; }
 @keyframes qcol-flash {
-  0%, 55% {
-    border-color: var(--qcol-green);
-    box-shadow: 0 0 0 3px rgba(0, 152, 69, .18);
-  }
-  100% {
-    border-color: var(--qcol-line);
-    box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
-  }
+  0%, 55% { box-shadow: 0 0 0 2px var(--qcol-green); }
+  100%    { box-shadow: 0 0 0 2px transparent; }
 }
 
-/* transient message (navigation hints) */
 .qcol-toast {
   position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 130px;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
   z-index: 5;
   background: rgba(31, 41, 55, .93);
   color: #fff;
-  border-radius: 7px;
-  padding: 7px 11px;
+  border-radius: 6px;
+  padding: 6px 10px;
   font-size: 11.5px;
   text-align: center;
   box-shadow: 0 4px 12px rgba(16, 24, 40, .2);
 }
 
-/* ---------- compose area ---------- */
+/* ---------- composer ---------- */
 
 .qcol-compose {
-  padding: 10px 12px 12px;
+  padding: 7px 8px 8px;
   background: var(--qcol-card);
   border-top: 1px solid var(--qcol-line);
 }
 
 .qcol-replybar {
   background: #f0faf4;
-  border-left: 3px solid var(--qcol-green);
-  padding: 4px 10px;
+  border-left: 2px solid var(--qcol-green);
+  padding: 3px 8px;
   border-radius: 4px;
-  margin-bottom: 7px;
+  margin-bottom: 5px;
   color: var(--qcol-muted);
   font-size: 11.5px;
 }
@@ -432,129 +423,159 @@
 }
 .qcol-cancelreply:hover { color: #dc2626; }
 
+.qcol-identity-wait {
+  background: #f4f6f8;
+  border: 1px solid var(--qcol-line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin-bottom: 5px;
+  color: var(--qcol-faint);
+  font-size: 11.5px;
+}
+.qcol-identity-error { background: #fdecec; border-color: #f5c2c2; color: #c02626; }
+
 .qcol-author, .qcol-attach {
   box-sizing: border-box;
   border: 1px solid #d8dce1;
-  border-radius: 7px;
-  padding: 5px 9px;
+  border-radius: 6px;
+  padding: 4px 8px;
   background: var(--qcol-card);
   font-size: 12px;
   color: var(--qcol-ink);
-  transition: border-color .15s;
 }
-.qcol-author { width: 100%; margin-bottom: 6px; }
+.qcol-author { width: 100%; margin-bottom: 5px; }
 .qcol-author:focus, .qcol-attach:focus { outline: none; border-color: var(--qcol-green); }
 .qcol-author.qcol-invalid { border-color: #dc2626; }
-.qcol-author-locked {
-  background: #f1f3f5;
-  color: var(--qcol-muted);
-  cursor: default;
-}
 
-/* attach row: dropdown + click-to-pick button */
-.qcol-attachrow { display: flex; gap: 6px; margin-bottom: 6px; }
+/* ---------- ＋ drawer ----------
+   Attaching a comment to a chart is occasional; a permanent dropdown, picker
+   button and checkbox cost ~57px on every sheet for the times it is not. */
+
+.qcol-extras {
+  border: 1px solid var(--qcol-line);
+  border-radius: 6px;
+  padding: 6px;
+  margin-bottom: 5px;
+  background: #fafbfc;
+}
+.qcol-attachrow { display: flex; gap: 5px; }
 .qcol-attach { flex: 1; min-width: 0; }
 .qcol-pick {
   border: 1px solid #d8dce1;
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--qcol-card);
   cursor: pointer;
-  padding: 3px 10px;
+  padding: 2px 9px;
   font-size: 13px;
-  transition: border-color .15s, background .15s;
 }
 .qcol-pick:hover { border-color: var(--qcol-green); }
 .qcol-pick.qcol-picking { background: var(--qcol-green); border-color: var(--qcol-green); }
 
-.qcol-attachchips { margin-bottom: 6px; line-height: 21px; }
-.qcol-chip-sheet { background: #f1f3f5; color: var(--qcol-faint); }
-.qcol-chip-obj { background: #e6f6ec; color: #1e7e40; }
-.qcol-chip-x {
-  color: #1e7e40;
-  text-decoration: none;
-  font-weight: bold;
-  margin-left: 3px;
-}
-.qcol-chip-x:hover { color: #dc2626; }
-
-.qcol-pickhint {
-  background: #e6f6ec;
-  color: #1e7e40;
-  border-radius: 6px;
-  padding: 4px 10px;
-  margin-bottom: 6px;
-  font-size: 11.5px;
-}
-
 .qcol-withsel {
   display: block;
   color: var(--qcol-muted);
-  margin: 0 0 6px;
+  margin-top: 6px;
   cursor: pointer;
   font-size: 11.5px;
 }
 .qcol-withsel input { vertical-align: middle; margin-right: 5px; accent-color: var(--qcol-green); }
 
+.qcol-attachchips, .qcol-pending { margin-bottom: 5px; line-height: 19px; }
+.qcol-chip-obj { background: #e6f6ec; color: #1e7e40; }
+.qcol-chip-file { background: #fef3e2; color: #b26a00; }
+.qcol-voicerr { background: #fdecec; color: #c02626; }
+.qcol-chip-x, .qcol-pending-x {
+  text-decoration: none;
+  font-weight: bold;
+  margin-left: 3px;
+  color: inherit;
+}
+.qcol-chip-x:hover, .qcol-pending-x:hover { color: #dc2626; }
+
+.qcol-pickhint {
+  background: #e6f6ec;
+  color: #1e7e40;
+  border-radius: 5px;
+  padding: 3px 8px;
+  margin-bottom: 5px;
+  font-size: 11.5px;
+}
+
+/* One row grown to fit, instead of two rows reserved in advance. */
 .qcol-input {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid #d8dce1;
-  border-radius: 7px;
-  padding: 7px 9px;
-  resize: vertical;
+  border-radius: 6px;
+  padding: 6px 8px;
+  resize: none;
+  overflow-y: auto;
   font-family: inherit;
   font-size: 12.5px;
-  line-height: 1.5;
-  margin-bottom: 7px;
+  line-height: 1.45;
+  margin-bottom: 6px;
   color: var(--qcol-ink);
-  transition: border-color .15s;
+  display: block;
+  min-height: 30px;
+  max-height: 108px;
 }
 .qcol-input:focus { outline: none; border-color: var(--qcol-green); }
 .qcol-input::placeholder { color: var(--qcol-faint); }
 
-.qcol-pending { margin-bottom: 6px; line-height: 21px; }
-.qcol-chip-file { background: #fef3e2; color: #b26a00; }
-.qcol-voicerr { background: #fdecec; color: #c02626; }
-.qcol-pending-x { color: #b26a00; text-decoration: none; font-weight: bold; margin-left: 3px; }
-.qcol-pending-x:hover { color: #dc2626; }
-
-/* toolbar: attach / voice / send */
-.qcol-toolbar { display: flex; gap: 6px; }
-.qcol-filebtn, .qcol-voice {
+.qcol-toolbar { display: flex; gap: 5px; }
+.qcol-more, .qcol-filebtn, .qcol-voice {
+  flex: none;
   border: 1px solid #d8dce1;
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--qcol-card);
   cursor: pointer;
-  padding: 5px 11px;
+  padding: 4px 9px;
   font-size: 13px;
-  transition: border-color .15s;
+  line-height: 1.2;
 }
-.qcol-filebtn:hover, .qcol-voice:hover { border-color: var(--qcol-green); }
+.qcol-more:hover, .qcol-filebtn:hover, .qcol-voice:hover { border-color: var(--qcol-green); }
+.qcol-more.qcol-open { background: #e6f6ec; border-color: var(--qcol-green); }
 .qcol-voice.qcol-recording {
   background: #dc2626;
   border-color: #dc2626;
   animation: qcol-pulse 1s infinite;
 }
-@keyframes qcol-pulse {
-  50% { opacity: .55; }
-}
+@keyframes qcol-pulse { 50% { opacity: .55; } }
 
 .qcol-send {
   flex: 1;
   background: var(--qcol-green);
   color: #fff;
   border: none;
-  border-radius: 7px;
-  padding: 8px 0;
-  font-size: 13px;
+  border-radius: 6px;
+  padding: 5px 0;
+  font-size: 12.5px;
   font-weight: 600;
-  letter-spacing: .2px;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0, 152, 69, .3);
-  transition: background .15s;
 }
 .qcol-send:hover { background: var(--qcol-green-dark); }
 .qcol-send:active { transform: translateY(1px); }
+.qcol-send:disabled { background: #c7cdd4; cursor: default; }
+
+/* ---------- size adaptation ----------
+   Set from a ResizeObserver, because a Qlik object is resized by dragging, not by
+   the viewport: media queries never fire. Type size is deliberately untouched —
+   only chrome gives way, so a small panel stays readable rather than shrinking. */
+
+.qcol-narrow .qcol-me-name,
+.qcol-narrow .qcol-ver { display: none; }
+.qcol-narrow .qcol-header { padding: 6px 8px; }
+.qcol-narrow .qcol-reply { margin-left: 12px; }
+
+.qcol-short .qcol-header { padding: 4px 10px; }
+.qcol-short .qcol-list { padding: 5px 6px 3px; }
+.qcol-short .qcol-day { margin: 4px 0 5px; }
+.qcol-short .qcol-item { margin-bottom: 5px; }
+.qcol-short .qcol-compose { padding: 5px 6px 6px; }
+.qcol-short .qcol-input { min-height: 26px; max-height: 60px; margin-bottom: 4px; }
+/* At this height the panel is a few messages tall; the actions would eat a
+   visible share of it, so they stay hover-only and the separators go. */
+.qcol-short .qcol-day { display: none; }
 
 /* ---------- picking-mode highlights on Qlik cells (global) ---------- */
 
