@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.8.1";
+  var EXT_VERSION = "0.9.0";
 
   function esc(text) {
     return String(text)
@@ -1105,8 +1105,23 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
 
       function refresh() {
+        // The server decides what this person may read — the team sees every thread,
+        // anyone else only their own — so it has to be told who is asking. Until the
+        // identity resolves it would answer with an empty list, which would blank the
+        // panel and then repopulate it; skip the round trip instead.
+        var me = ($author.val() || "").trim();
+        if (!me) {
+          // Manual mode with nothing typed is a dead end the user can fix; the Qlik
+          // identity path is still resolving and the composer already says so.
+          if ($author.is(":visible")) {
+            $list.html('<div class="qcol-empty">Enter your name below to see the discussion.</div>');
+          }
+          return;
+        }
+
         var url = self._apiUrl + "/api/comments?appId=" + encodeURIComponent(self._appId) +
-                  "&sheetId=" + encodeURIComponent(self._sheetId);
+                  "&sheetId=" + encodeURIComponent(self._sheetId) +
+                  "&user=" + encodeURIComponent(me);
         fetch(url)
           .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(function (data) {

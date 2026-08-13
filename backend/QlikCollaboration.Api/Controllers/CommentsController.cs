@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.SignalR;
 using Npgsql;
 using QlikCollaboration.Api.Hubs;
 using QlikCollaboration.Api.Models;
+using QlikCollaboration.Api.Services;
 
 namespace QlikCollaboration.Api.Controllers;
 
@@ -12,20 +13,26 @@ namespace QlikCollaboration.Api.Controllers;
 public class CommentsController : ControllerBase
 {
     // object_ids is aggregated from the comment_objects junction table
+    // The join to the parent is what makes a thread the unit of visibility: a reply
+    // belongs to whoever started the thread, not to whoever wrote the reply. Joining
+    // on a primary key adds no rows, so the object_ids aggregate is unaffected.
     private const string SelectComment =
         @"SELECT c.id, c.app_id, c.sheet_id, c.app_name, c.sheet_name, c.parent_id, c.author, c.body,
                  c.selection_state, c.status, c.is_deleted, c.created_at, c.updated_at,
                  COALESCE(array_agg(co.object_id) FILTER (WHERE co.object_id IS NOT NULL), '{}') AS object_ids
           FROM comments c
-          LEFT JOIN comment_objects co ON co.comment_id = c.id";
+          LEFT JOIN comment_objects co ON co.comment_id = c.id
+          LEFT JOIN comments p ON p.id = c.parent_id";
 
     private readonly NpgsqlDataSource _db;
     private readonly IHubContext<CommentsHub> _hub;
+    private readonly TeamRoster _team;
 
-    public CommentsController(NpgsqlDataSource db, IHubContext<CommentsHub> hub)
+    public CommentsController(NpgsqlDataSource db, IHubContext<CommentsHub> hub, TeamRoster team)
     {
         _db = db;
         _hub = hub;
+        _team = team;
     }
 
     private Task Broadcast(string appId, string sheetId) =>
@@ -50,21 +57,44 @@ public class CommentsController : ControllerBase
             if (byComment.TryGetValue(c.Id, out var list)) c.Attachments = list;
     }
 
-    /// <summary>All comments (incl. replies) for a sheet, oldest first.
-    /// Optional objectId returns only comments attached to that object.</summary>
+    /// <summary>
+    /// Comments for a sheet, oldest first, filtered to what <paramref name="user"/>
+    /// may see: the BI team sees every thread, anyone else sees only the threads they
+    /// started — so two executives never read each other's feedback.
+    ///
+    /// Filtering happens here rather than in the panel because a client-side filter
+    /// would still have sent every comment over the wire. It is not a security
+    /// boundary: like the rest of this API it trusts the username it is given
+    /// (see docs/Enterprise.md), so it prevents disclosure by the UI, not by a
+    /// determined caller. Real enforcement needs the JWT work listed there.
+    ///
+    /// Optional objectId returns only comments attached to that object.
+    /// </summary>
     [HttpGet]
     public async Task<IEnumerable<Comment>> Get(
-        [FromQuery] string appId, [FromQuery] string sheetId, [FromQuery] string? objectId = null)
+        [FromQuery] string appId, [FromQuery] string sheetId,
+        [FromQuery] string? user = null, [FromQuery] string? objectId = null)
     {
+        // No identity yet — the panel asks before it has resolved who you are. Showing
+        // everything "just until it knows" would leak exactly what this filter exists
+        // to prevent, so show nothing and let the panel ask again a moment later.
+        if (string.IsNullOrWhiteSpace(user)) return [];
+
+        var isTeam = _team.IsTeamMember(user);
+
         await using var conn = await _db.OpenConnectionAsync();
         var sql = SelectComment +
                   " WHERE c.app_id = @appId AND c.sheet_id = @sheetId AND c.is_deleted = FALSE" +
+                  // COALESCE picks the thread's author: the parent's for a reply,
+                  // the comment's own for a root comment.
+                  " AND (@isTeam OR lower(COALESCE(p.author, c.author)) = lower(@user))" +
                   (objectId is not null
                       ? @" AND EXISTS (SELECT 1 FROM comment_objects x
                                        WHERE x.comment_id = c.id AND x.object_id = @objectId)"
                       : "") +
                   " GROUP BY c.id ORDER BY c.created_at";
-        var comments = (await conn.QueryAsync<Comment>(sql, new { appId, sheetId, objectId })).ToList();
+        var comments = (await conn.QueryAsync<Comment>(
+            sql, new { appId, sheetId, objectId, user = user.Trim(), isTeam })).ToList();
         await AttachFiles(conn, comments);
         return comments;
     }
@@ -114,26 +144,28 @@ public class CommentsController : ControllerBase
                 "INSERT INTO comment_objects (comment_id, object_id) VALUES (@id, @objectId)",
                 objectIds.Select(o => new { id, objectId = o }), tx);
 
-        // Every comment goes to the whole team: there are no private messages and
-        // nothing is addressed at one person, so everyone except the author gets a
-        // notification. The only distinction is the kind — the author of the comment
-        // being replied to sees "replied to you" rather than "commented".
+        // Notify exactly the people who are allowed to read this thread — the BI team,
+        // plus the person who started it. Notifying every registered user would tell
+        // one executive that another had commented, and the excerpt in the
+        // notification would say what about.
+        //
+        // Replies are one level deep (see schema.sql), so a reply's parent is always
+        // the root: the parent's author IS the thread's author.
         var parentAuthor = dto.ParentId is int parentId
             ? await conn.ExecuteScalarAsync<string?>(
                 "SELECT author FROM comments WHERE id = @parentId", new { parentId }, tx)
             : null;
+        var threadAuthor = parentAuthor ?? author;
 
-        var usernames = (await conn.QueryAsync<string>("SELECT username FROM users", transaction: tx)).ToList();
-        var toNotify = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var u in usernames)
+        // The comparer collapses case-variant duplicates ("ivanov" / "Ivanov") into a
+        // single notification, and makes the self-removal below case-insensitive too.
+        var toNotify = new HashSet<string>(_team.Members, StringComparer.OrdinalIgnoreCase);
+        toNotify.Add(threadAuthor);
+        toNotify.Remove(author);            // never notify yourself about your own comment
+
+        foreach (var u in toNotify)
         {
-            if (u.Equals(author, StringComparison.OrdinalIgnoreCase)) continue;
-            // Add() returns false when already queued — also collapses case-variant
-            // duplicates ("ivanov" / "Ivanov") into a single notification
-            if (!toNotify.Add(u)) continue;
-            var kind = parentAuthor is not null && u.Equals(parentAuthor, StringComparison.OrdinalIgnoreCase)
-                ? "reply"
-                : "comment";
+            var kind = u.Equals(threadAuthor, StringComparison.OrdinalIgnoreCase) ? "reply" : "comment";
             await conn.ExecuteAsync(
                 "INSERT INTO notifications (username, comment_id, kind) VALUES (@u, @id, @kind)",
                 new { id, u, kind }, tx);

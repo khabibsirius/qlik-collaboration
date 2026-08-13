@@ -211,6 +211,7 @@ Windows Service inject secrets without writing them to a file.
 | `Storage:AttachmentsPath` | `Storage__AttachmentsPath` | where uploaded files are written |
 | `Cors:AllowedOrigins:0` | `Cors__AllowedOrigins__0` | allowed browser origin; `*` = any (dev only) |
 | `Qlik:BaseUrl` | `Qlik__BaseUrl` | Qlik hub the inbox's "open the sheet" links point at, e.g. `https://qlik.bank.local`. Different on every server — set it per deployment |
+| `Team:Members:0` | `Team__Members__0` | **Set this.** Usernames of the BI team, who see every thread. Everyone else sees only the threads they started. Empty = everyone is a guest and the team sees nothing; the API warns at startup |
 | `Swagger:Enabled` | `Swagger__Enabled` | expose `/swagger` (keep off in production) |
 
 ---

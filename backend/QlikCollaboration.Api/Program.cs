@@ -1,6 +1,7 @@
 using Dapper;
 using Npgsql;
 using QlikCollaboration.Api.Hubs;
+using QlikCollaboration.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,6 +16,7 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<TeamRoster>();
 
 var connectionString = builder.Configuration.GetConnectionString("Postgres");
 if (string.IsNullOrWhiteSpace(connectionString))
@@ -40,6 +42,18 @@ var app = builder.Build();
 
 app.Logger.LogInformation("CORS: {Policy}",
     allowAnyOrigin ? "any origin (development)" : string.Join(", ", allowedOrigins));
+
+// Worth saying out loud at startup: an empty roster means every user is treated as a
+// guest and sees only their own threads, which looks exactly like "the panel lost all
+// the comments" to the team that configured nothing.
+var roster = app.Services.GetRequiredService<TeamRoster>();
+if (roster.Count == 0)
+    app.Logger.LogWarning(
+        "Team:Members is empty — every user is treated as a guest and will see only " +
+        "the threads they started. List the BI team's usernames to give them the full view.");
+else
+    app.Logger.LogInformation("BI team ({Count}): {Members}",
+        roster.Count, string.Join(", ", roster.Members));
 
 // Swagger is handy on a pilot server but is an unnecessary surface in production —
 // turn it off with Swagger:Enabled=false.

@@ -123,9 +123,14 @@ recommendation; the central node is the acceptable shortcut for a pilot.
 
 ## How the team experiences it
 
-- Open any sheet that has the panel → see the sheet's discussion. It is one shared
-  conversation: there are no private messages, everyone sees every comment, and
-  each one carries its author's AD name.
+- Open any sheet that has the panel → see the discussion you are entitled to. The
+  **BI team** (`Team:Members` in the API's configuration) sees every thread on the
+  sheet. **Everyone else** — the executives the dashboards are built for — sees only
+  the threads they started themselves, so two of them never read each other's
+  feedback. Every comment carries its author's AD name.
+- The **team inbox** (`/` on the API host) shows every thread from every app and does
+  **not** filter by user. It is a tool for the BI team: restrict it at the reverse
+  proxy or firewall, and do not hand the URL to the executives.
 - Write comments, reply, attach files/voice, set statuses.
 - **Every comment notifies the whole team** — the 🔔 gets an unread badge the next
   time a colleague has the panel open, instantly if they are online (SignalR).

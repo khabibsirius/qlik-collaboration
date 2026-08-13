@@ -2,9 +2,32 @@
 
 Base URL (dev): `http://localhost:5000` · Swagger UI: `/swagger`
 
-## GET /api/comments?appId=&sheetId=[&objectId=]
+## Who can see what
 
-All non-deleted comments for a sheet (including replies), oldest first.
+Two kinds of user, decided by the `Team:Members` setting:
+
+- **BI team** — the usernames listed in `Team:Members`. They see every thread.
+- **Everyone else** (the executives the dashboards are built for) — sees only the
+  threads **they started**, plus the replies in them. Two executives never read
+  each other's feedback.
+
+The unit of visibility is the *thread*, not the message: a reply belongs to
+whoever started the thread. A thread started by a team member is therefore
+internal — guests do not see it.
+
+An empty `Team:Members` means everyone is a guest, which is the safe direction to
+fail; the API logs a warning at startup when it is empty.
+
+> This is not a security boundary. Like the rest of this API it trusts the
+> username it is given, so it prevents disclosure **by the UI**, not by someone
+> calling the API directly with another name. Real enforcement needs the JWT work
+> in [Enterprise.md](Enterprise.md).
+
+## GET /api/comments?appId=&sheetId=&user=[&objectId=]
+
+Non-deleted comments for a sheet (including replies), oldest first, filtered to
+what `user` may see. **`user` is required** — without it the response is `[]`,
+so a client that forgets it shows nothing rather than everything.
 
 ```json
 [
@@ -41,20 +64,19 @@ All non-deleted comments for a sheet (including replies), oldest first.
 
 Returns `201` with the created comment.
 
-**Notification routing** — every comment is team-wide news, so **everyone except
-the author** is notified. There are no private messages and no way to address a
-comment at one person; the only difference between recipients is the `kind` they
-see:
+**Notification routing** — a comment notifies exactly the people allowed to read
+its thread: the BI team (`Team:Members`), plus whoever started the thread. Never
+the author of the comment itself.
 
 | Recipient | `kind` |
 |---|---|
-| the author of the comment being replied to | `reply` |
-| everyone else | `comment` |
+| the person who started the thread | `reply` |
+| the BI team | `comment` |
 
-The audience is every row in `users`, which the panel populates when someone
-opens it — not only when they post (see `POST /api/users`). Notifications written
-before @mentions were removed keep their old `mention` / `broadcast` kinds and
-still render.
+Notifying every registered user would tell one executive that another had
+commented, and the 80-character excerpt would say what about. Notifications
+written before @mentions were removed keep their old `mention` / `broadcast`
+kinds and still render.
 
 ## DELETE /api/comments/{id}?author=
 
