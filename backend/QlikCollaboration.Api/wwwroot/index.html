@@ -47,6 +47,33 @@
   .filters button:hover { border-color: var(--green); }
   .filters button.on { background: var(--green); border-color: var(--green); color: #fff; }
 
+  .selects { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .selects select {
+    border: 1px solid var(--line);
+    background: var(--card);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font: inherit; font-size: 12.5px;
+    color: var(--muted);
+    cursor: pointer;
+    max-width: 210px;
+  }
+  .selects select:hover { border-color: var(--green); }
+  /* A filter that is on has to look on. Otherwise a narrowed list reads as
+     "the comments are gone" and the next question is why the tool lost them. */
+  .selects select.on {
+    border-color: var(--green);
+    color: var(--green-dark);
+    font-weight: 600;
+  }
+  .selects select:disabled { opacity: .55; cursor: default; }
+  #fClear {
+    border: 0; background: none; padding: 2px 4px;
+    font: inherit; font-size: 12px; color: var(--muted);
+    cursor: pointer; text-decoration: underline;
+  }
+  #fClear:hover { color: #dc2626; }
+
   .conn { font-size: 11.5px; color: var(--faint); white-space: nowrap; }
   .conn.live::before { content: "● "; color: var(--green); }
   .conn.down::before { content: "● "; color: #dc2626; }
@@ -124,6 +151,12 @@
     <button data-f="fixed">Fixed</button>
     <button data-f="closed">Include closed</button>
   </div>
+  <div class="selects">
+    <select id="fUser" title="Show only threads started by this person"></select>
+    <select id="fApp" title="Show only this Qlik app"></select>
+    <select id="fSheet" title="Show only this sheet"></select>
+    <button id="fClear" style="display:none">clear</button>
+  </div>
   <div class="spacer"></div>
   <div class="conn" id="conn">connecting…</div>
 </header>
@@ -143,6 +176,7 @@
 
   var qlikBaseUrl = "";
   var filter = "all";
+  var fUser = "", fApp = "", fSheet = "";   // "" means no restriction
   var items = [];
   var expanded = {};          // thread id -> replies array, once fetched
   var lastPayload = "";
@@ -182,20 +216,143 @@
   }
   function clearError() { $err.style.display = "none"; }
 
-  function matches(it) {
+  function sheetKey(it) { return it.appId + "|" + it.sheetId; }
+
+  function matchesStatus(it) {
     if (filter === "all") return it.status !== "closed";
     if (filter === "closed") return true;              // "include closed" = everything
     if (filter === "unanswered") return it.replyCount === 0 && it.status !== "closed";
     return it.status === filter;
   }
 
+  function matches(it) {
+    if (!matchesStatus(it)) return false;
+    if (fUser && it.author !== fUser) return false;
+    if (fApp && it.appId !== fApp) return false;
+    if (fSheet && sheetKey(it) !== fSheet) return false;
+    return true;
+  }
+
+  // ---- the three dropdowns -------------------------------------------------
+  // Everything the inbox draws is already in memory, so these filter the loaded
+  // set rather than asking the server again — no round trip, no spinner.
+
+  var $fUser = document.getElementById("fUser");
+  var $fApp = document.getElementById("fApp");
+  var $fSheet = document.getElementById("fSheet");
+  var $fClear = document.getElementById("fClear");
+
+  // nameOf may be empty on rows written before titles were captured, and the same
+  // app can have both kinds. Take the real title from whichever row has one instead
+  // of whichever row happens to come first, or the list offers a C:\...\data.qvf
+  // path while the name "data" sits in the next row down.
+  function distinct(list, keyOf, nameOf, fallbackOf) {
+    var byKey = {}, out = [];
+    list.forEach(function (it) {
+      var k = keyOf(it);
+      if (!k) return;
+      var name = nameOf(it);
+      if (!byKey[k]) {
+        byKey[k] = { value: k, label: name || fallbackOf(it), named: !!name };
+        out.push(byKey[k]);
+      } else if (!byKey[k].named && name) {
+        byKey[k].label = name;
+        byKey[k].named = true;
+      }
+    });
+    return out.sort(function (a, b) { return a.label.localeCompare(b.label); });
+  }
+
+  // Repainting a <select> while it is open closes it under the cursor, so only
+  // rebuild when the available options have really changed.
+  function fillSelect(el, allLabel, options, current) {
+    var sig = options.map(function (o) { return o.value; }).join("");
+    if (el.getAttribute("data-sig") !== sig) {
+      el.setAttribute("data-sig", sig);
+      el.innerHTML = '<option value="">' + esc(allLabel) + "</option>" +
+        options.map(function (o) {
+          return '<option value="' + esc(o.value) + '">' + esc(o.label) + "</option>";
+        }).join("");
+    }
+    el.value = current;
+    // The selection is gone from the data — a deleted comment, or an app filter
+    // that just excluded it. Falling back to "all" beats showing an empty list
+    // filtered by something that no longer exists.
+    if (el.value !== current) el.value = "";
+    el.classList.toggle("on", !!el.value);
+    return el.value;
+  }
+
+  function syncFilters() {
+    // Built from everything loaded, not from the visible rows: narrowing by one
+    // dropdown must not remove the other choices from the other two.
+    fUser = fillSelect($fUser, "All people",
+      distinct(items, function (i) { return i.author; },
+                      function (i) { return i.author; },
+                      function (i) { return i.author; }),
+      fUser);
+
+    fApp = fillSelect($fApp, "All apps",
+      distinct(items, function (i) { return i.appId; },
+                      function (i) { return i.appName; },
+                      function (i) { return i.appId; }),
+      fApp);
+
+    // Sheets cascade from the app: two apps can both have a sheet called
+    // "Overview", so without the app the choice would be ambiguous. With no app
+    // chosen the label carries the app name to keep them apart.
+    var forSheets = fApp ? items.filter(function (i) { return i.appId === fApp; }) : items;
+    var appLabelOf = function (i) { return i.appName || i.appId; };
+    fSheet = fillSelect($fSheet, "All sheets",
+      distinct(forSheets, sheetKey,
+        function (i) {
+          if (!i.sheetName) return "";                       // let the fallback run
+          return fApp ? i.sheetName : appLabelOf(i) + " › " + i.sheetName;
+        },
+        function (i) {
+          return fApp ? i.sheetId : appLabelOf(i) + " › " + i.sheetId;
+        }),
+      fSheet);
+
+    $fClear.style.display = (fUser || fApp || fSheet) ? "" : "none";
+  }
+
+  function onFilterChange() {
+    fUser = $fUser.value;
+    fApp = $fApp.value;
+    // Changing the app invalidates a sheet from a different one.
+    if (fSheet && fSheet.indexOf(fApp + "|") !== 0 && fApp) fSheet = "";
+    else fSheet = $fSheet.value;
+    render();
+  }
+
+  $fUser.addEventListener("change", onFilterChange);
+  $fApp.addEventListener("change", onFilterChange);
+  $fSheet.addEventListener("change", onFilterChange);
+  $fClear.addEventListener("click", function () {
+    fUser = fApp = fSheet = "";
+    render();
+  });
+
   function render() {
+    syncFilters();          // may drop a selection whose data has gone, so filter after
     var shown = items.filter(matches);
     $count.textContent = "(" + shown.length + ")";
 
     if (!shown.length) {
+      // Name the filters that are hiding things. "Nothing here" while three
+      // dropdowns are quietly set is how people conclude the data was lost.
+      var narrowed = [];
+      if (fUser) narrowed.push("person");
+      if (fApp) narrowed.push("app");
+      if (fSheet) narrowed.push("sheet");
       $list.innerHTML = '<div class="empty"><strong>Nothing here</strong>' +
-        (filter === "all" ? "Every comment has been closed." : "No threads match this filter.") +
+        (narrowed.length
+          ? "No threads match the " + narrowed.join(" and ") + " filter" +
+            (narrowed.length > 1 ? "s" : "") + " you have set."
+          : filter === "all"
+            ? "Every comment has been closed."
+            : "No threads match this filter.") +
         "</div>";
       return;
     }
@@ -207,6 +364,9 @@
       var key = it.appId + "|" + it.sheetId;
       if (!byKey[key]) { byKey[key] = { key: key, first: it, items: [] }; groups.push(byKey[key]); }
       byKey[key].items.push(it);
+      // Same reason as the dropdowns: prefer the row that actually carries titles,
+      // so a group is not headed by a .qvf path when a name exists further down.
+      if (!byKey[key].first.appName && it.appName) byKey[key].first = it;
     });
 
     $list.innerHTML = groups.map(function (g) {
