@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.11.0";
+  var EXT_VERSION = "0.11.1";
 
   function esc(text) {
     return String(text)
@@ -1275,8 +1275,21 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       $element.on("click", ".qcol-delete", function (e) {
         e.preventDefault();
-        var id = $(this).data("id");
-        fetch(self._apiUrl + "/api/comments/" + id + "?author=" + encodeURIComponent($author.val().trim()), { method: "DELETE" })
+        var $link = $(this);
+        // The actions are on screen the whole time now, so a stray click is no longer
+        // something you had to hover to reach — and a delete has nothing to undo it.
+        // Ask in place rather than with a modal, and forget the question after a few
+        // seconds so a link left reading "sure?" cannot be clicked into later.
+        if (!$link.hasClass("qcol-confirm")) {
+          $link.addClass("qcol-confirm").text("delete?");
+          clearTimeout(self._deleteTimer);
+          self._deleteTimer = setTimeout(function () {
+            $link.removeClass("qcol-confirm").text("delete");
+          }, 3000);
+          return;
+        }
+        clearTimeout(self._deleteTimer);
+        fetch(self._apiUrl + "/api/comments/" + $link.data("id") + "?author=" + encodeURIComponent($author.val().trim()), { method: "DELETE" })
           .then(refresh);
       });
 

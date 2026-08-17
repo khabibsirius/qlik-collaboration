@@ -357,16 +357,19 @@
 .qcol-att-file:hover { text-decoration: underline; }
 .qcol-att-file span { color: var(--qcol-faint); }
 
-/* Actions reveal on hover so they cost no height when idle. Touch and keyboard
-   have no hover, so focus-within reveals them too. */
+/* Constant height, always present, dimmed until the message is hovered.
+   These used to be height:0 and revealed on hover, which changed the card's height:
+   sweeping the cursor down the list pushed every message below it, and at the border
+   between two messages it oscillated — the card grew, moved out from under the
+   cursor, un-hovered, shrank, landed back under the cursor, and repeated. Hover may
+   change colour, never layout. Leaving them visible also means nobody has to
+   discover that hovering is what produces a reply link. */
 .qcol-actions {
-  height: 0;
-  overflow: hidden;
-  opacity: 0;
-  transition: opacity .15s;
+  opacity: .5;
+  transition: opacity .12s;
 }
 .qcol-msg:hover .qcol-actions,
-.qcol-msg:focus-within .qcol-actions { height: auto; opacity: 1; }
+.qcol-msg:focus-within .qcol-actions { opacity: 1; }
 .qcol-actions a {
   color: var(--qcol-muted);
   margin-right: 10px;
@@ -376,6 +379,8 @@
 .qcol-actions a:hover { color: var(--qcol-ink); }
 .qcol-applysel { color: var(--qcol-green) !important; font-weight: 500; }
 .qcol-delete:hover { color: #dc2626 !important; }
+/* armed: the next click really deletes */
+.qcol-delete.qcol-confirm { color: #dc2626 !important; font-weight: 600; }
 
 .qcol-flash { animation: qcol-flash 2.2s ease-out; }
 @keyframes qcol-flash {
