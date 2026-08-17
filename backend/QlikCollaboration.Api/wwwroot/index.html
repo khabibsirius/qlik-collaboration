@@ -269,7 +269,10 @@
     var sig = options.map(function (o) { return o.value; }).join("");
     if (el.getAttribute("data-sig") !== sig) {
       el.setAttribute("data-sig", sig);
-      el.innerHTML = '<option value="">' + esc(allLabel) + "</option>" +
+      // Carry the count. With a single app in the data, choosing it removes nothing,
+      // and a dropdown that visibly does nothing reads as broken — "All apps (1)"
+      // answers that before anyone has to ask.
+      el.innerHTML = '<option value="">' + esc(allLabel) + " (" + options.length + ")</option>" +
         options.map(function (o) {
           return '<option value="' + esc(o.value) + '">' + esc(o.label) + "</option>";
         }).join("");
