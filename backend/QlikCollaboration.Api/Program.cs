@@ -1,3 +1,4 @@
+using System.Reflection;
 using Dapper;
 using Npgsql;
 using QlikCollaboration.Api.Hubs;
@@ -110,30 +111,56 @@ app.UseExceptionHandler(branch => branch.Run(async context =>
 
 app.UseCors();
 
-// The team inbox is a static page served by this same app: no extra host, no extra
-// port, no CORS, and it ships wherever the API ships.
-app.UseDefaultFiles();
+// Port 5000 is the API. The only thing served as a page is the admin panel, at
+// /admin — so an integration pointing at the root gets an API, not a UI.
+// /admin is the address people type; /admin/ is the one DefaultFiles can resolve to
+// an index.html. Middleware rather than a mapped route, because routing treats the
+// two as the same endpoint — a route here matched /admin/ as well and redirected it
+// to itself, forever.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path == "/admin")
+    {
+        context.Response.Redirect("/admin/");
+        return;
+    }
+    await next();
+});
+
+app.UseDefaultFiles();     // /admin/ -> /admin/index.html
 app.UseStaticFiles();
 
 // A build that predates the inbox page — or a container built from a stale publish
 // folder, which Dockerfile.prebuilt copies verbatim — answers /health perfectly while
 // "/" returns 404. Those two symptoms together look like a routing problem and are
 // not, so name the real cause once, at startup, where the log will be looked at.
-var inboxPage = Path.Combine(app.Environment.WebRootPath ?? "", "index.html");
+var inboxPage = Path.Combine(app.Environment.WebRootPath ?? "", "admin", "index.html");
 if (File.Exists(inboxPage))
-    app.Logger.LogInformation("Team inbox served at /");
+    app.Logger.LogInformation("Admin panel served at /admin");
 else
     app.Logger.LogWarning(
-        "wwwroot/index.html is missing from this build, so the team inbox at / will 404 " +
+        "wwwroot/admin/index.html is missing from this build, so the admin panel at /admin " +
+        "will 404 " +
         "while the API itself works. Re-run `dotnet publish` and rebuild the image — a " +
         "publish folder made before the inbox existed does not contain it.");
 
 app.MapControllers();
 app.MapHub<CommentsHub>("/hubs/comments");
 
+// The root is the API's front door: what this is and where to go. Deliberately not
+// a page — the admin panel is at /admin and nowhere else.
+app.MapGet("/", () => Results.Ok(new
+{
+    service = "Qlik Collaboration API",
+    version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
+    admin = "/admin",
+    health = "/health",
+    diagnostics = "/api/diagnostics"
+}));
+
 // Which Qlik to send people back to. There is one of these per deployment — a
 // Desktop machine, a test server and a production server all have different hosts —
-// so the inbox reads it at runtime instead of being rebuilt for each.
+// so the panel reads it at runtime instead of being rebuilt for each.
 app.MapGet("/api/config", (IConfiguration config) => Results.Ok(new
 {
     qlikBaseUrl = (config["Qlik:BaseUrl"] ?? "http://localhost:4848").TrimEnd('/')

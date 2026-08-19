@@ -414,7 +414,7 @@
 
 <div id="tip"></div>
 
-<script src="signalr.min.js"></script>
+<script src="/signalr.min.js"></script>
 <script>
 (function () {
   "use strict";
@@ -866,7 +866,7 @@
   }
 
   function loadPeople() {
-    return fetch("api/users")
+    return fetch("/api/users")
       .then(function (r) { return r.json(); })
       .then(function (list) { people = list || []; renderPeople(); })
       .catch(function () { showError("Could not load the people list."); });
@@ -933,7 +933,7 @@
     var sel = e.target.closest(".role-pick");
     if (sel) {
       var user = sel.getAttribute("data-user");
-      fetch("api/users/" + encodeURIComponent(user) + "/role", {
+      fetch("/api/users/" + encodeURIComponent(user) + "/role", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: sel.value, by: me })
@@ -956,7 +956,7 @@
 
   // ---- data ---------------------------------------------------------------
   function load() {
-    fetch("api/inbox?includeClosed=" + (filter === "closed"))
+    fetch("/api/inbox?includeClosed=" + (filter === "closed"))
       .then(function (r) { if (!r.ok) throw new Error("server answered " + r.status); return r.json(); })
       .then(function (data) {
         clearError();
@@ -1046,7 +1046,7 @@
     var chip = e.target.closest("button.chip");
     if (chip) {
       var next = ORDER[(ORDER.indexOf(chip.getAttribute("data-status")) + 1) % ORDER.length];
-      fetch("api/comments/" + chip.getAttribute("data-id") + "/status", {
+      fetch("/api/comments/" + chip.getAttribute("data-id") + "/status", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: next })
@@ -1070,7 +1070,7 @@
         }, 3000);
         return;
       }
-      fetch("api/comments/" + del.getAttribute("data-del") + "?author=" + encodeURIComponent(me),
+      fetch("/api/comments/" + del.getAttribute("data-del") + "?author=" + encodeURIComponent(me),
             { method: "DELETE" })
         .then(function (r) {
           if (!r.ok) throw new Error("server answered " + r.status);
@@ -1084,7 +1084,7 @@
     if (toggle) {
       var id = toggle.getAttribute("data-toggle");
       if (Object.prototype.hasOwnProperty.call(expanded, id)) { delete expanded[id]; render(); return; }
-      fetch("api/inbox/" + id + "/replies")
+      fetch("/api/inbox/" + id + "/replies")
         .then(function (r) { return r.json(); })
         .then(function (rs) { expanded[id] = rs || []; render(); })
         .catch(function () { showError("Could not load the replies."); });
@@ -1115,7 +1115,7 @@
     if (typeof signalR === "undefined") { $conn.textContent = "polling"; return; }
     try {
       var conn = new signalR.HubConnectionBuilder()
-        .withUrl("hubs/comments").withAutomaticReconnect().build();
+        .withUrl("/hubs/comments").withAutomaticReconnect().build();
       conn.on("commentsChanged", load);
       conn.onreconnected(function () { $conn.className = "conn live"; $conn.textContent = "live"; load(); });
       conn.onclose(function () { $conn.className = "conn down"; $conn.textContent = "reconnecting…"; setPoll(10000); });
@@ -1127,7 +1127,7 @@
 
   // The Qlik host differs per deployment; ask before first render or every
   // "open the sheet" link points at the wrong machine.
-  fetch("api/config")
+  fetch("/api/config")
     .then(function (r) { return r.json(); })
     .then(function (c) { qlikBaseUrl = (c && c.qlikBaseUrl) || ""; })
     .catch(function () { /* links are simply omitted */ })

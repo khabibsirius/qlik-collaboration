@@ -222,7 +222,7 @@ Windows Service inject secrets without writing them to a file.
 | `Email:PickupDirectory` | `Email__PickupDirectory` | write `.eml` files to this folder **instead of sending** — how to test before you have a relay |
 | `Email:IntervalMinutes` | `Email__IntervalMinutes` | how often to check (default 30, minimum 5) |
 | `Email:ReminderHours` | `Email__ReminderHours` | with nothing new, re-send the unanswered list at most this often (default 24) |
-| `Email:InboxUrl` | `Email__InboxUrl` | the team inbox address the e-mail links to |
+| `Email:InboxUrl` | `Email__InboxUrl` | the team inbox address the e-mail links to, e.g. http://server:5000/admin |
 
 ### Making an existing database good
 
@@ -246,6 +246,21 @@ psql -U postgres -d qlik_collaboration -f database/repair.sql
 - **builds the unique index** that could not exist while the duplicates did.
 
 It ends with a short report, and it is safe to run twice.
+
+### What is served where
+
+Port 5000 is the API. The only page it serves is the admin panel.
+
+| | |
+|---|---|
+| `/` | JSON describing the service — not a page |
+| `/admin` | the admin panel (team inbox, roles, dashboard breakdown) |
+| `/api/…` | the API the Qlik extension calls |
+| `/hubs/comments` | SignalR, for live updates |
+| `/health` | liveness plus a database probe |
+| `/api/diagnostics` | what is deployed and what state the database is in |
+
+`Email:InboxUrl` should point at `/admin`, since that is what the digest links to.
 
 ### When something is wrong
 
