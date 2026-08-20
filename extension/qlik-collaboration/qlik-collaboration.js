@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.14.0";
+  var EXT_VERSION = "0.14.1";
 
   // The backend address is typed by hand into the property panel, and pasting it out
   // of a browser bar brings a trailing slash with it. Left alone, every call then goes
@@ -1976,6 +1976,23 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       }
       self._applyDisplayMode = applyDisplayMode;
 
+      // ---- the greeting on hover ----
+      // Toggled here rather than in CSS: see the note by .qcol-greeting-on. Also lets
+      // a drag clear it, which a :hover rule cannot do.
+      function showGreeting(on) {
+        $panel.toggleClass("qcol-greeting-on", !!on && !self._expanded);
+      }
+      self._showGreeting = showGreeting;
+
+      // Bound straight to the button rather than delegated: it is created once with
+      // the skeleton and never re-rendered, so there is nothing for delegation to
+      // catch up with, and one less layer between the pointer and the greeting.
+      var bubbleEl = $ui.find(".qcol-bubble")[0];
+      if (bubbleEl) {
+        bubbleEl.addEventListener("mouseenter", function () { showGreeting(true); });
+        bubbleEl.addEventListener("mouseleave", function () { showGreeting(false); });
+      }
+
       // ---- drag the bubble ----
       // A press that never really moves is a click; anything past a few pixels is a
       // drag. Without that distinction the bubble either cannot be moved or cannot be
@@ -1992,6 +2009,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
           if (!moved && Math.abs(dx) + Math.abs(dy) < 4) return;
           moved = true;
           $panel.addClass("qcol-dragging");
+        showGreeting(false);        // a tooltip that chases the pointer is noise
           self._bubblePos = clamp({ left: origin.left + dx, top: origin.top + dy });
           placeBubble();
         }
@@ -2024,6 +2042,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
       function setExpanded(open) {
         self._expanded = open;
+        showGreeting(false);        // expanded there is no bubble left to explain
         try { localStorage.setItem("qlikCollab.expanded", open ? "1" : "0"); } catch (e) { /* noop */ }
         applyDisplayMode();
         if (open) {

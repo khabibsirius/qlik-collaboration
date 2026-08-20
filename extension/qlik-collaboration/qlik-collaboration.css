@@ -626,6 +626,9 @@
      per line. max-content sizes to the sentence instead, then max-width wraps it
      at a sensible measure. */
   width: max-content;
+  /* border-box so max-width is the width you actually see: without it the 24px of
+     padding is added on top and the bubble comes out wider than the number says. */
+  box-sizing: border-box;
   max-width: 240px;
   padding: 8px 12px;
   border-radius: 14px;
@@ -664,9 +667,12 @@
 
 .qcol-greet-unread { opacity: .8; }
 
-/* Hover only, and only while collapsed — expanded there is no bubble to explain. */
-.qcol-bubbly:not(.qcol-expanded) .qcol-bubble:hover ~ .qcol-greet,
-.qcol-bubbly:not(.qcol-expanded) .qcol-greet:hover { display: block; }
+/* Shown by a class the script toggles on mouseenter, not by a sibling selector.
+   The first version used `.qcol-bubble:hover ~ .qcol-greet`, and `~` only reaches
+   siblings that come AFTER — the greeting is written before the button, so the rule
+   could never match and the greeting never appeared. A class also survives the
+   markup being reordered, and can be cleared while dragging. */
+.qcol-bubbly:not(.qcol-expanded).qcol-greeting-on .qcol-greet { display: block; }
 
 /* Dragging is not hovering: the greeting would follow the pointer around the screen. */
 .qcol-panel.qcol-dragging .qcol-greet { display: none !important; }
