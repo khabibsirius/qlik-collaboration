@@ -608,7 +608,68 @@
 }
 /* ...and the panel itself takes its clicks back. */
 .qcol-bubbly { pointer-events: auto; }
-.qcol-bubbly:not(.qcol-expanded) > *:not(.qcol-bubble) { display: none !important; }
+/* The greeting is the one thing besides the button that may show while collapsed. */
+.qcol-bubbly:not(.qcol-expanded) > *:not(.qcol-bubble):not(.qcol-greet) { display: none !important; }
+
+/* ---------- hover greeting ----------
+   Pure CSS on :hover — no click, and nothing to dismiss. It is positioned against
+   the 46px collapsed panel, so it follows the bubble wherever it has been dragged. */
+.qcol-greet {
+  display: none;
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 12px);          /* to the LEFT of the bubble by default */
+  transform: translateY(-50%);
+  z-index: 1;
+  /* An absolutely positioned box shrinks to fit the space its containing block
+     leaves it — and that block is the 46px bubble, so the text came out one word
+     per line. max-content sizes to the sentence instead, then max-width wraps it
+     at a sensible measure. */
+  width: max-content;
+  max-width: 240px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: var(--qcol-ink);
+  color: #fff;
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: normal;
+  box-shadow: 0 6px 18px rgba(16, 24, 40, .28);
+  /* it must never intercept the pointer: the bubble underneath is the target */
+  pointer-events: none;
+}
+/* A bubble parked on the left half opens its greeting to the right instead, so it
+   does not hang off the edge people most like to keep the bubble against. */
+.qcol-greet-flip .qcol-greet {
+  right: auto;
+  left: calc(100% + 12px);
+}
+
+/* the little tail, pointing back at the bubble */
+.qcol-greet::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  margin-top: -5px;
+  border: 5px solid transparent;
+  border-left-color: var(--qcol-ink);
+}
+.qcol-greet-flip .qcol-greet::after {
+  left: auto;
+  right: 100%;
+  border-left-color: transparent;
+  border-right-color: var(--qcol-ink);
+}
+
+.qcol-greet-unread { opacity: .8; }
+
+/* Hover only, and only while collapsed — expanded there is no bubble to explain. */
+.qcol-bubbly:not(.qcol-expanded) .qcol-bubble:hover ~ .qcol-greet,
+.qcol-bubbly:not(.qcol-expanded) .qcol-greet:hover { display: block; }
+
+/* Dragging is not hovering: the greeting would follow the pointer around the screen. */
+.qcol-panel.qcol-dragging .qcol-greet { display: none !important; }
 .qcol-bubbly:not(.qcol-expanded) .qcol-bubble {
   display: flex;
   align-items: center;

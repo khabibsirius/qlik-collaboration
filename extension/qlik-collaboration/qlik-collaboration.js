@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.13.3";
+  var EXT_VERSION = "0.14.0";
 
   // The backend address is typed by hand into the property panel, and pasting it out
   // of a browser bar brings a trailing slash with it. Left alone, every call then goes
@@ -147,6 +147,12 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
                   ],
                   defaultValue: "auto"
                 },
+                greeting: {
+                  ref: "collab.greeting",
+                  label: "Bubble greeting (shown on hover)",
+                  type: "string",
+                  defaultValue: "Hello, I'm Zhansaya — how can I help you?"
+                },
                 displayMode: {
                   ref: "collab.displayMode",
                   label: "Panel display",
@@ -174,6 +180,8 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       var pollMs = ((layout.collab && layout.collab.pollSeconds) || 3) * 1000;
       var identityMode = (layout.collab && layout.collab.identityMode) || "auto";
       var displayMode = (layout.collab && layout.collab.displayMode) || "bubble";
+      var greeting = (layout.collab && layout.collab.greeting) ||
+                     "Hello, I'm Zhansaya — how can I help you?";
 
       // Build the UI once; later paints only re-apply changed settings.
       // (Qlik re-paints on resize and after every property-panel edit, so this
@@ -193,6 +201,10 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         // Qlik repaints when the sheet switches between analysis and edit mode, so
         // this is also where floating gives way to docked while a sheet is edited.
         if (self._displayMode !== displayMode) self._displayMode = displayMode;
+        if (self._greeting !== greeting) {
+          self._greeting = greeting;
+          $element.find(".qcol-greet-text").text(greeting);
+        }
         if (self._applyDisplayMode) self._applyDisplayMode();
         // Qlik repaints on resize, so this keeps the size buckets right even on a
         // client with no ResizeObserver.
@@ -245,7 +257,10 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '<div class="qcol-panel">' +
         // Collapsed state. Lives in the cell (make that cell small on the sheet);
         // expanding lifts the panel out over the dashboard.
-        '  <button class="qcol-bubble" title="Comments">' +
+        '  <span class="qcol-greet">' +
+        '    <span class="qcol-greet-text"></span><span class="qcol-greet-unread"></span>' +
+        '  </span>' +
+        '  <button class="qcol-bubble">' +
         '    <span class="qcol-bubble-icon">💬</span>' +
         '    <span class="qcol-bubble-badge" style="display:none"></span>' +
         '  </button>' +
@@ -297,6 +312,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // is about to be moved out of that cell and onto document.body. Delegated
       // handlers bound to the cell would stop firing the moment it moves.
       var $ui = $element.find(".qcol-panel");
+      $ui.find(".qcol-greet-text").text(greeting);
       var ownerId = (layout.qInfo && layout.qInfo.qId) || "";
       $ui.attr("data-qcol-owner", ownerId);
       self._panelEl = $ui[0];
@@ -331,6 +347,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // later paint is picked up by the resolver below
       self._identityMode = identityMode;
       self._displayMode = displayMode;
+      self._greeting = greeting;
       self._applyMethod = (layout.collab && layout.collab.applyMethod) || "auto";
       self._authorDirectory = null;
 
@@ -880,8 +897,10 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
             // it, hiding the panel would also hide the fact that anyone had written.
             var $bub = $ui.find(".qcol-bubble-badge");
             if (unread > 0) $bub.text(label).show(); else $bub.hide();
-            $ui.find(".qcol-bubble").attr("title",
-              unread > 0 ? "Comments — " + unread + " new" : "Comments");
+            // The greeting is the tooltip now; a title attribute would put a second,
+            // plain one on top of it. The unread count rides along in the greeting.
+            $ui.find(".qcol-greet-unread").text(
+              unread > 0 ? " · " + unread + (unread === 1 ? " new comment" : " new comments") : "");
 
             // Rebuilding the open dropdown on every poll would reset its scroll
             // under the user's cursor — only redraw when something changed.
@@ -1844,6 +1863,10 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       function placeBubble() {
         var p = self._bubblePos;
         $panel.css({ left: p.left + "px", top: p.top + "px" });
+        // The greeting opens towards the middle of the screen: to the left of a bubble
+        // parked on the right, to the right of one parked on the left. Otherwise it
+        // hangs off the edge exactly where people like to keep the bubble.
+        $panel.toggleClass("qcol-greet-flip", p.left + BUBBLE / 2 < window.innerWidth / 2);
       }
 
       // Open next to the bubble, growing into whichever side has room, so the panel
