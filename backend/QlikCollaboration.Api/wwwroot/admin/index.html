@@ -109,8 +109,10 @@
     display: flex; align-items: center; gap: 14px;
   }
   .head-filters { padding: 9px 20px 10px; }
-  h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .1px; }
-  h1 b { color: var(--muted); font-weight: 400; }
+  h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: .1px; }
+  /* The count is context, not the name — held at the old size so growing the title
+     makes the name bigger rather than the whole line. */
+  h1 b { color: var(--muted); font-weight: 400; font-size: 14px; }
   .spacer { flex: 1; }
 
   .conn { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
