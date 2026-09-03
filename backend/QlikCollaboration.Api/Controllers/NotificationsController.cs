@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
+using QlikCollaboration.Api.Services;
 
 namespace QlikCollaboration.Api.Controllers;
 
@@ -25,11 +26,27 @@ public class NotificationsController : ControllerBase
         public string SheetId { get; set; } = "";
     }
 
-    /// <summary>Latest 50 notifications for a user, newest first.</summary>
+    /// <summary>
+    /// Latest 50 notifications for a user, newest first — filtered to the comments
+    /// that user may read <b>now</b>.
+    ///
+    /// Visibility is applied here, at read time, rather than trusted from the moment
+    /// the row was written. A notification carries an 80-character excerpt of the
+    /// comment, so a sheet that was public when someone commented and is private
+    /// again today would otherwise keep handing that text out through the bell: the
+    /// discussion disappears from the panel while its history stays legible in the
+    /// notification list. Re-deciding on every read makes the switch mean the same
+    /// thing in both places, in both directions — turning a sheet public also reveals
+    /// the notifications that were hidden while it was not.
+    /// </summary>
     [HttpGet]
     public async Task<IEnumerable<NotificationDto>> Get([FromQuery] string user)
     {
+        if (string.IsNullOrWhiteSpace(user)) return [];
+
         await using var conn = await _db.OpenConnectionAsync();
+        var isTeam = UserRoles.SeesEverything(await UserRoles.Of(conn, user));
+
         return await conn.QueryAsync<NotificationDto>(
             @"SELECT n.id, n.kind, n.is_read, n.created_at, n.comment_id,
                      c.author AS from_author, left(c.body, 80) AS excerpt,
@@ -38,9 +55,14 @@ public class NotificationsController : ControllerBase
               -- skip notifications whose comment was deleted: clicking one would
               -- navigate the user to a sheet where there is nothing to show
               JOIN comments c ON c.id = n.comment_id AND c.is_deleted = FALSE
+              -- the thread's author, which is who a reply belongs to
+              LEFT JOIN comments p ON p.id = c.parent_id
               WHERE n.username = @user
+                AND (" + Visibility.IsPublicSql + @"
+                     OR @isTeam
+                     OR lower(COALESCE(p.author, c.author)) = lower(@user))
               ORDER BY n.created_at DESC
-              LIMIT 50", new { user });
+              LIMIT 50", new { user = user.Trim(), isTeam });
     }
 
     /// <summary>Mark all of a user's notifications as read.</summary>

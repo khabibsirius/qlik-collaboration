@@ -108,6 +108,45 @@ CREATE TABLE IF NOT EXISTS notifications (
                                         REFERENCES comments (id) ON DELETE CASCADE
 );
 
+-- Whether a discussion is public, per app and per sheet.
+--
+-- The default everywhere is PRIVATE, which is the behaviour that existed before this
+-- table: the BI team sees every thread, everyone else sees only the threads they
+-- started, so two executives never read each other's feedback. A row here opts one
+-- app, or one sheet, out of that.
+--
+-- sheet_id = '' is the app-wide default; any other value is one sheet, and it beats
+-- the app-wide row. So an app can be public with a single sensitive sheet kept
+-- private, or the reverse. Absent rows mean private, which is why nothing needs
+-- back-filling and why an app nobody has configured cannot leak.
+--
+-- '' rather than NULL because a primary key column cannot be NULL, and the lookup
+-- wants both levels addressable by the same key.
+CREATE TABLE IF NOT EXISTS comment_visibility (
+    app_id     TEXT        NOT NULL,
+    sheet_id   TEXT        NOT NULL DEFAULT '',
+    is_public  BOOLEAN     NOT NULL DEFAULT FALSE,
+    set_by     TEXT        NOT NULL,
+    set_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT pk_comment_visibility PRIMARY KEY (app_id, sheet_id)
+);
+
+-- Who was @mentioned in a comment. Only written for comments on a public discussion:
+-- a notification carries an excerpt of the comment, so mentioning someone who cannot
+-- open the thread would hand them the text through the bell. The API enforces that;
+-- this table only records what happened.
+CREATE TABLE IF NOT EXISTS mentions (
+    id                 SERIAL,
+    comment_id         INTEGER     NOT NULL,
+    mentioned_username TEXT        NOT NULL,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT pk_mentions         PRIMARY KEY (id),
+    CONSTRAINT fk_mentions_comment FOREIGN KEY (comment_id)
+                                   REFERENCES comments (id) ON DELETE CASCADE
+);
+
 -- One row per digest e-mail actually sent.
 CREATE TABLE IF NOT EXISTS digest_runs (
     id          SERIAL,
@@ -173,6 +212,8 @@ CREATE INDEX IF NOT EXISTS idx_comments_parent      ON comments (parent_id);
 CREATE INDEX IF NOT EXISTS idx_comment_objects_object ON comment_objects (object_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_comment  ON attachments (comment_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user   ON notifications (username, is_read);
+CREATE INDEX IF NOT EXISTS idx_mentions_comment     ON mentions (comment_id);
+CREATE INDEX IF NOT EXISTS idx_mentions_username    ON mentions (lower(mentioned_username));
 
 -- The team inbox's main query: open threads across every app, newest first.
 CREATE INDEX IF NOT EXISTS idx_comments_open
@@ -210,5 +251,13 @@ COMMENT ON TABLE notifications IS
     'One row per recipient per comment. A new comment produces one for the team and for the thread''s author.';
 COMMENT ON COLUMN notifications.kind IS
     'comment | reply | status_change. Rows written before @mentions were removed may also hold mention or broadcast.';
+COMMENT ON TABLE comment_visibility IS
+    'Which apps and sheets have a public discussion. No row means private, the safe default. sheet_id = '' is the app-wide setting; a row for one sheet overrides it.';
+COMMENT ON COLUMN comment_visibility.set_by IS
+    'The admin who last changed it. "Why can everyone see this sheet?" is a question that has to have an answer.';
+
+COMMENT ON TABLE mentions IS
+    'Who was @mentioned in a comment. Written only on public discussions - see the note on the table.';
+
 COMMENT ON TABLE digest_runs IS
     'One row per digest e-mail actually sent. The next digest reports what happened since the last row, which stops it repeating the same unanswered comment every half hour.';

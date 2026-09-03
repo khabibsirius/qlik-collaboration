@@ -169,11 +169,29 @@ of these steps is then `https://` and `wss://`. See
 - "Panel display → Docked" in the properties panel restores the old always-open
   behaviour, and the panel falls back to docked by itself while a sheet is being edited,
   or on a client where `position: fixed` is anchored to the cell rather than the window.
-- Open any sheet that has the panel → see the discussion you are entitled to. The
-  **BI team** (`Team:Members` in the API's configuration) sees every thread on the
-  sheet. **Everyone else** — the executives the dashboards are built for — sees only
-  the threads they started themselves, so two of them never read each other's
-  feedback. Every comment carries its author's AD name.
+- Open any sheet that has the panel → see the discussion you are entitled to. Every
+  comment carries its author's AD name, and the panel header says which mode the
+  sheet is in — 🔒 Private or 🌐 Public — so nobody has to infer it from whose
+  comments happen to be on screen.
+- **Private is the default**, everywhere, with nothing configured. The **BI team**
+  (`team` / `admin`) sees every thread on the sheet; **everyone else** — the
+  executives the dashboards are built for — sees only the threads they started
+  themselves, so two of them never read each other's feedback.
+- **Public** is a deliberate exception, set by an admin in the panel at `/admin`
+  ("Who can read"), per app and per sheet: the sheet's own setting wins, otherwise
+  the app's, otherwise private. On a public sheet everyone who can open it sees the
+  whole discussion and can **@mention** colleagues — the composer offers an
+  autocomplete of known users, and the mentioned person's bell says "mentioned you"
+  instead of "commented".
+
+  A mention **adds** to the team broadcast rather than replacing it. That
+  distinction is the reason @mentions were removed in v0.7.0: a tagged comment used
+  to reach one person instead of the team. Everyone who would have been notified
+  still is.
+
+  Mentions are refused outright on a private discussion, whatever the panel offers:
+  a notification carries an 80-character excerpt of the comment, so mentioning
+  someone who cannot open the thread would hand them the text through the bell.
 - The **team inbox** (`/` on the API host) shows every thread from every app and does
   **not** filter by user. It is a tool for the BI team: restrict it at the reverse
   proxy or firewall, and do not hand the URL to the executives.

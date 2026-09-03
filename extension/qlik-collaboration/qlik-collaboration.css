@@ -770,3 +770,67 @@
   outline-offset: -3px;
   cursor: crosshair !important;
 }
+
+/* ---------- visibility badge and @mentions ----------
+   Whether a discussion is public is not a detail: it decides who reads what someone
+   writes, so it is stated in the header rather than left to be inferred from whose
+   comments happen to be on screen. */
+
+.qcol-vis {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 6px;
+  margin-left: 6px;
+  border-radius: 9px;
+  white-space: nowrap;
+  background: #eef0f3;
+  color: #4b5563;
+  cursor: default;
+}
+.qcol-vis.qcol-vis-public {
+  background: #e6f4ec;
+  color: var(--qcol-green);
+}
+/* The header is tight on a small cell; the badge is the first thing to go, because
+   the placeholder in the composer says the same thing in words. */
+.qcol-narrow .qcol-vis { display: none; }
+
+.qcol-mention {
+  color: var(--qcol-green);
+  font-weight: 600;
+  background: rgba(0, 152, 69, .08);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+/* The autocomplete opens UPWARDS: the composer sits at the bottom of the panel, and
+   a list dropping below it would fall outside. */
+.qcol-compose { position: relative; }
+
+.qcol-mentions {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 100%;
+  margin-bottom: 4px;
+  z-index: 5;
+  max-height: 160px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--qcol-line);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .14);
+}
+.qcol-mention-opt {
+  padding: 5px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.qcol-mention-opt:hover,
+.qcol-mention-opt.qcol-sel {
+  background: #e6f4ec;
+  color: var(--qcol-green-dark);
+}

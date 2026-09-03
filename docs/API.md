@@ -4,9 +4,13 @@ Base URL (dev): `http://localhost:5000` · Swagger UI: `/swagger`
 
 ## Who can see what
 
-Two kinds of user, decided by the `Team:Members` setting:
+A discussion is **private** unless an admin says otherwise. Private is the default
+everywhere and needs nothing configured.
 
-- **BI team** — the usernames listed in `Team:Members`. They see every thread.
+**Private** — two kinds of user, decided by the role in the `users` table
+(seeded from `Team:Members` / `Team:Admins`, managed at `/admin`):
+
+- **BI team** (`team` / `admin`) — sees every thread.
 - **Everyone else** (the executives the dashboards are built for) — sees only the
   threads **they started**, plus the replies in them. Two executives never read
   each other's feedback.
@@ -14,6 +18,17 @@ Two kinds of user, decided by the `Team:Members` setting:
 The unit of visibility is the *thread*, not the message: a reply belongs to
 whoever started the thread. A thread started by a team member is therefore
 internal — guests do not see it.
+
+**Public** — everyone who can open the sheet sees the whole discussion, and can
+`@mention` colleagues. Set per app, and per sheet inside it: the sheet's own
+setting wins, otherwise the app's, otherwise private. See
+[`/api/visibility`](#get-apivisibility).
+
+@mentions are written **only** on a public discussion. A notification carries an
+80-character excerpt of the comment, so mentioning someone who cannot open the
+thread would hand them the text through the bell; the API refuses to, whatever the
+panel offers. A mention never replaces the team broadcast — it upgrades that
+person's notification from `comment` to `mention` and nothing else.
 
 An empty `Team:Members` means everyone is a guest, which is the safe direction to
 fail; the API logs a warning at startup when it is empty.
@@ -89,6 +104,47 @@ Soft delete; only succeeds if `author` matches (Desktop trust model — replaced
 ```
 
 Returns the updated comment.
+
+## GET /api/visibility
+
+Every app and sheet that has comments, with the setting governing it — not only the
+rows already configured, so a dashboard can be found here before anyone has set it.
+
+```json
+[ { "appId": "c8f2…", "appName": "Sales", "comments": 42,
+    "setting": "public", "effective": true, "setBy": "ivanov", "setAt": "…",
+    "sheets": [ { "sheetId": "hJk…", "sheetName": "Margins", "comments": 12,
+                  "setting": "inherit", "effective": true } ] } ]
+```
+
+`setting` is `default` / `public` / `private` for an app, and `inherit` / `public` /
+`private` for a sheet. `effective` is what actually applies once the app-wide value
+is taken into account.
+
+## GET /api/visibility/resolve?appId=&sheetId=
+
+What applies to one sheet, and which level decided it. No role needed — the panel
+calls it on load to know whether to offer the @ button.
+
+```json
+{ "isPublic": true, "source": "sheet" }
+```
+
+`source` is `sheet`, `app` or `default`.
+
+## PUT /api/visibility
+
+Admin only (403 otherwise). Omit `sheetId` to set the app-wide default.
+
+```json
+{ "appId": "c8f2…", "sheetId": "hJk…", "isPublic": true, "by": "ivanov" }
+```
+
+## DELETE /api/visibility?appId=&sheetId=&by=
+
+Admin only. Removes a setting so the level above decides again: clearing a sheet
+returns it to its app, clearing an app returns it to private. `404` when there was
+nothing set at that level — which is the state being asked for anyway.
 
 ## GET /api/users
 

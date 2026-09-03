@@ -26,7 +26,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.14.1";
+  var EXT_VERSION = "0.15.1";
 
   // The backend address is typed by hand into the property panel, and pasting it out
   // of a browser bar brings a trailing slash with it. Left alone, every call then goes
@@ -247,6 +247,9 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       self._pendingFiles = [];
       self._notifs = [];
       self._live = false;
+      self._isPublic = false;      // private until the server says otherwise
+      self._visKnown = false;
+      self._people = [];
 
       var sheetInfo = qlik.navigation.getCurrentSheetId();
       self._sheetId = sheetInfo.success ? sheetInfo.sheetId : "unknown-sheet";
@@ -267,6 +270,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '  <div class="qcol-header">' +
         '    <span class="qcol-title" title="Qlik Collaboration v' + EXT_VERSION + '">Comments ' +
         '<span class="qcol-count"></span> <span class="qcol-ver">v' + EXT_VERSION + '</span></span>' +
+        '    <span class="qcol-vis" style="display:none"></span>' +
         '    <span class="qcol-headright">' +
         '      <span class="qcol-me" style="display:none">' +
         '        <span class="qcol-me-avatar"></span><span class="qcol-me-name"></span>' +
@@ -295,7 +299,8 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '    <input class="qcol-author" type="text" placeholder="Your name" maxlength="60"/>' +
         '    <div class="qcol-attachchips" style="display:none"></div>' +
         '    <div class="qcol-pickhint" style="display:none">Click charts to attach/detach… (Esc or 🎯 to finish)</div>' +
-        '    <textarea class="qcol-input" placeholder="Write a comment — everyone sees it" rows="1"></textarea>' +
+        '    <div class="qcol-mentions" style="display:none"></div>' +
+        '    <textarea class="qcol-input" placeholder="Write a comment" rows="1"></textarea>' +
         '    <div class="qcol-pending"></div>' +
         '    <div class="qcol-toolbar">' +
         '      <button class="qcol-pick" title="Attach this comment to charts: click them on the sheet">🎯</button>' +
@@ -1165,7 +1170,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
                  (c.objectIds.length > 1 ? "×" + c.objectIds.length : "") + "</span>";
           }
           h += "</div>";
-          h += '<div class="qcol-body">' + esc(c.body) + "</div>";
+          h += '<div class="qcol-body">' + highlightMentions(esc(c.body)) + "</div>";
           h += renderAttachments(c);
           h += '<div class="qcol-actions">';
           if (c.selectionState && c.selectionState !== "null") {
@@ -1249,7 +1254,119 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
                " (QLIK_ORIGIN on the server). " + api + "/api/diagnostics shows which";
       }
 
+      // ---------- visibility & @mentions ----------
+
+      // Who may read a discussion is the server's decision, per app and per sheet.
+      // The panel only reflects it: it offers @ where a mention can actually reach
+      // someone, and it stops the placeholder promising that "everyone sees it" on a
+      // sheet where they do not -- which is what it used to say everywhere.
+      function applyVisibility(isPublic) {
+        self._isPublic = !!isPublic;
+        $ui.find(".qcol-vis").show()
+          .toggleClass("qcol-vis-public", self._isPublic)
+          .text(self._isPublic ? "🌐 Public" : "🔒 Private")
+          .attr("title", self._isPublic
+            ? "Everyone who can open this sheet sees the whole discussion. Type @ to mention someone."
+            : "You see the threads you started; the BI team sees all of them. An admin can make this sheet public.");
+        $input.attr("placeholder", self._isPublic
+          ? "Write a comment \u2014 everyone here sees it. Type @ to mention"
+          : "Write a comment \u2014 you and the BI team see it");
+        if (self._isPublic && !self._people.length) loadPeople();
+        if (!self._isPublic) closeMentionBox();
+      }
+
+      // Re-read at most once a minute. An admin flipping the switch should reach an
+      // open panel without anyone reloading Qlik, but not at the cost of a request
+      // every three seconds alongside the comment poll.
+      function loadVisibility() {
+        var now = Date.now();
+        if (now - (self._visAt || 0) < 60000) return;
+        self._visAt = now;
+        fetch(self._apiUrl + "/api/visibility/resolve?appId=" + encodeURIComponent(self._appId) +
+              "&sheetId=" + encodeURIComponent(self._sheetId))
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (v) {
+            if (!v) return;
+            if (!self._visKnown || v.isPublic !== self._isPublic) {
+              self._visKnown = true;
+              applyVisibility(v.isPublic);
+            }
+          })
+          .catch(function () { /* the connection dot already reports an unreachable API */ });
+      }
+
+      // Only fetched for a public discussion -- the one place a mention does anything.
+      function loadPeople() {
+        fetch(self._apiUrl + "/api/users")
+          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (list) { self._people = list || []; })
+          .catch(function () { self._people = []; });
+      }
+
+      // Runs on ALREADY-ESCAPED text, so it cannot introduce markup of its own, and
+      // highlights only names belonging to a real person -- which is exactly what the
+      // server stores. A typo is not a mention and must not look like one.
+      function highlightMentions(escapedHtml) {
+        if (!self._isPublic || !self._people.length) return escapedHtml;
+        var known = {};
+        self._people.forEach(function (p) { known[String(p.username).toLowerCase()] = true; });
+        return escapedHtml.replace(/(^|[^\w@.])@([A-Za-z0-9._\-]{1,64})/g,
+          function (all, before, name) {
+            var trimmed = name.replace(/[.\-_]+$/, "");
+            if (!known[trimmed.toLowerCase()]) return all;
+            return before + '<span class="qcol-mention">@' + trimmed + "</span>" + name.slice(trimmed.length);
+          });
+      }
+
+      // The @token being typed, if the caret is inside one.
+      function mentionQuery() {
+        if (!self._isPublic) return null;
+        var el = $input[0];
+        var upto = el.value.slice(0, el.selectionStart);
+        var m = /(^|[^\w@.])@([A-Za-z0-9._\-]{0,64})$/.exec(upto);
+        return m ? { term: m[2], start: el.selectionStart - m[2].length - 1 } : null;
+      }
+
+      function closeMentionBox() {
+        $ui.find(".qcol-mentions").hide().empty();
+        self._mentionOpen = false;
+      }
+
+      function openMentionBox() {
+        var q = mentionQuery();
+        if (!q) { closeMentionBox(); return; }
+        var term = q.term.toLowerCase();
+        var matches = self._people.filter(function (p) {
+          return String(p.username).toLowerCase().indexOf(term) === 0;
+        }).slice(0, 6);
+        if (!matches.length) { closeMentionBox(); return; }
+
+        $ui.find(".qcol-mentions").html(matches.map(function (p, i) {
+          return '<div class="qcol-mention-opt' + (i === 0 ? " qcol-sel" : "") +
+                 '" data-name="' + esc(p.username) + '">@' + esc(p.username) + "</div>";
+        }).join("")).show();
+        self._mentionOpen = true;
+        self._mentionStart = q.start;
+        self._mentionLen = q.term.length + 1;
+      }
+
+      function acceptMention($opt) {
+        var name = $opt.data("name");
+        if (!name) { closeMentionBox(); return; }
+        var el = $input[0];
+        var head = el.value.slice(0, self._mentionStart) + "@" + name + " ";
+        el.value = head + el.value.slice(self._mentionStart + self._mentionLen);
+        el.setSelectionRange(head.length, head.length);
+        closeMentionBox();
+        autoGrow();
+        $input.focus();
+      }
+
       function refresh() {
+        // Cheap, throttled, and independent of who is asking -- so it sits ahead of
+        // the identity check below rather than behind it.
+        loadVisibility();
+
         // The server decides what this person may read — the team sees every thread,
         // anyone else only their own — so it has to be told who is asking. Until the
         // identity resolves it would answer with an empty list, which would blank the
@@ -1384,7 +1501,24 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
       // ---------- events ----------
 
       $ui.on("click", ".qcol-send", function (e) { e.preventDefault(); send(); });
+      $ui.on("input", ".qcol-input", function () { if (self._isPublic) openMentionBox(); });
+      $ui.on("mousedown", ".qcol-mention-opt", function (e) { e.preventDefault(); acceptMention($(this)); });
+
       $ui.on("keydown", ".qcol-input", function (e) {
+        // While the @ list is open it owns the arrows, Enter and Tab. Ctrl+Enter is
+        // deliberately left alone: a half-typed mention must never swallow a send.
+        if (self._mentionOpen && !e.ctrlKey && !e.metaKey) {
+          var $opts = $ui.find(".qcol-mention-opt");
+          var i = Math.max(0, $opts.index($opts.filter(".qcol-sel")));
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            var next = (i + (e.key === "ArrowUp" ? -1 : 1) + $opts.length) % $opts.length;
+            $opts.removeClass("qcol-sel").eq(next).addClass("qcol-sel");
+            return;
+          }
+          if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); acceptMention($opts.eq(i)); return; }
+          if (e.key === "Escape") { e.preventDefault(); closeMentionBox(); return; }
+        }
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
       });
 

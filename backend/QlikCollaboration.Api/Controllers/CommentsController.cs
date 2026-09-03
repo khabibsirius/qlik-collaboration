@@ -80,18 +80,24 @@ public class CommentsController : ControllerBase
 
         await using var conn = await _db.OpenConnectionAsync();
         var isTeam = UserRoles.SeesEverything(await UserRoles.Of(conn, user));
+
+        // A public app or sheet drops the per-author filter for everyone. Private is
+        // the default and needs no row, so an app nobody has configured behaves
+        // exactly as it did before this setting existed.
+        var isPublic = await Visibility.IsPublicAsync(conn, appId, sheetId);
+
         var sql = SelectComment +
                   " WHERE c.app_id = @appId AND c.sheet_id = @sheetId AND c.is_deleted = FALSE" +
                   // COALESCE picks the thread's author: the parent's for a reply,
                   // the comment's own for a root comment.
-                  " AND (@isTeam OR lower(COALESCE(p.author, c.author)) = lower(@user))" +
+                  " AND (@isPublic OR @isTeam OR lower(COALESCE(p.author, c.author)) = lower(@user))" +
                   (objectId is not null
                       ? @" AND EXISTS (SELECT 1 FROM comment_objects x
                                        WHERE x.comment_id = c.id AND x.object_id = @objectId)"
                       : "") +
                   " GROUP BY c.id ORDER BY c.created_at";
         var comments = (await conn.QueryAsync<Comment>(
-            sql, new { appId, sheetId, objectId, user = user.Trim(), isTeam })).ToList();
+            sql, new { appId, sheetId, objectId, user = user.Trim(), isTeam, isPublic })).ToList();
         await AttachFiles(conn, comments);
         return comments;
     }
@@ -150,25 +156,44 @@ public class CommentsController : ControllerBase
             : null;
         var threadAuthor = parentAuthor ?? author;
 
-        // The comparer collapses case-variant duplicates ("ivanov" / "Ivanov") into a
-        // single notification, and makes the self-removal below case-insensitive too.
-        var toNotify = new HashSet<string>(
-            await UserRoles.NotifyAudience(conn, tx), StringComparer.OrdinalIgnoreCase);
-        toNotify.Add(threadAuthor);
-        toNotify.Remove(author);            // never notify yourself about your own comment
+        // @mentions exist only on a public discussion. A notification carries an
+        // excerpt of the comment, so mentioning someone who cannot open the thread
+        // would hand them the text through the bell — the one leak this feature could
+        // introduce, closed here rather than in the panel that offers the @ button.
+        var mentioned = await Visibility.IsPublicAsync(conn, dto.AppId, dto.SheetId, tx)
+            ? await Visibility.ResolveMentionsAsync(conn, dto.Body, tx)
+            : [];
 
-        foreach (var u in toNotify)
-        {
-            var kind = u.Equals(threadAuthor, StringComparison.OrdinalIgnoreCase) ? "reply" : "comment";
+        // One row per person, not one per reason. The comparer collapses case-variant
+        // duplicates ("ivanov" / "Ivanov") and makes the self-removal below
+        // case-insensitive too.
+        var recipients = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var u in await UserRoles.NotifyAudience(conn, tx)) recipients[u] = "comment";
+        recipients[threadAuthor] = "reply";
+
+        // Being named beats being on the team, so it replaces the weaker kind instead
+        // of adding a second notification. What it must NOT do is replace the
+        // broadcast: that is exactly the behaviour @mentions were removed for in
+        // v0.7.0 — a tagged comment reached one person instead of the team. Everyone
+        // above is still notified; the mention only changes what the bell says.
+        foreach (var m in mentioned) recipients[m] = "mention";
+
+        recipients.Remove(author);          // never notify yourself about your own comment
+
+        foreach (var (username, kind) in recipients)
             await conn.ExecuteAsync(
-                "INSERT INTO notifications (username, comment_id, kind) VALUES (@u, @id, @kind)",
-                new { id, u, kind }, tx);
-        }
+                "INSERT INTO notifications (username, comment_id, kind) VALUES (@username, @id, @kind)",
+                new { id, username, kind }, tx);
+
+        foreach (var m in mentioned)
+            await conn.ExecuteAsync(
+                "INSERT INTO mentions (comment_id, mentioned_username) VALUES (@id, @m)",
+                new { id, m }, tx);
 
         await tx.CommitAsync();
 
         await Broadcast(dto.AppId, dto.SheetId);
-        await NotifyUsers(toNotify.ToList());
+        await NotifyUsers(recipients.Keys.ToList());
 
         var created = await GetById(conn, id);
         return CreatedAtAction(nameof(Get), new { appId = created!.AppId, sheetId = created.SheetId }, created);

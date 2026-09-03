@@ -27,7 +27,9 @@ public static class SchemaGuard
         ("users",       "role",       "roles"),
         ("comments",    "app_name",   "dashboard titles in the inbox"),
         ("comments",    "sheet_name", "dashboard titles in the inbox"),
-        ("digest_runs", null,         "the e-mail digest")
+        ("digest_runs", null,         "the e-mail digest"),
+        ("comment_visibility", null,   "the public/private switch"),
+        ("mentions",    null,         "@mentions")
     ];
 
     /// <summary>
@@ -96,11 +98,54 @@ public static class SchemaGuard
     {
         await using var conn = await db.OpenConnectionAsync();
 
-        // Advisory, not fatal. Nothing in the code needs this index any more — user
-        // registration updates-then-inserts rather than relying on ON CONFLICT — so a
-        // database without it still serves comments correctly. What it costs is
-        // certainty about roles for the duplicated person, which is worth saying every
-        // time and not worth refusing to start over.
+        // Reconcile the tables FIRST. The index advisory below reads the users table,
+        // and on a brand-new empty database — a DBA creates one, ApplySchemaOnStart is
+        // meant to do the rest — that table is precisely what does not exist yet.
+        // Running the advisory first turned a fresh install into an unhandled Npgsql
+        // stack trace at startup: the exact failure this file exists to prevent.
+        var missing = await MissingAsync(conn);
+        if (missing.Count > 0)
+        {
+            if (!autoApply)
+            {
+                var nl = Environment.NewLine;
+                log.LogCritical(
+                    "This build needs database changes that are not there yet: {Missing}." + nl +
+                    "Apply them once — the file is idempotent, so it is safe on a live database " +
+                    "and keeps every existing comment:" + nl +
+                    "    psql -U postgres -d qlik_collaboration -f database/schema.sql" + nl +
+                    "Or set Database:ApplySchemaOnStart=true (env: Database__ApplySchemaOnStart=true) " +
+                    "to let the API apply it itself at startup.",
+                    string.Join("; ", missing));
+                return false;
+            }
+
+            log.LogWarning("Database is behind this build ({Missing}) — applying the schema.",
+                           string.Join("; ", missing));
+            await ApplyAsync(conn);
+
+            var still = await MissingAsync(conn);
+            if (still.Count > 0)
+            {
+                log.LogCritical("Applying the schema did not add: {Missing}", string.Join("; ", still));
+                return false;
+            }
+            log.LogInformation("Schema applied; database is up to date.");
+        }
+
+        await WarnAboutMissingIndexesAsync(conn, log);
+        return true;
+    }
+
+    /// <summary>
+    /// Advisory, not fatal. Nothing in the code needs this index any more — user
+    /// registration updates-then-inserts rather than relying on ON CONFLICT — so a
+    /// database without it still serves comments correctly. What it costs is certainty
+    /// about roles for the duplicated person, which is worth saying every time and not
+    /// worth refusing to start over.
+    /// </summary>
+    private static async Task WarnAboutMissingIndexesAsync(NpgsqlConnection conn, ILogger log)
+    {
         foreach (var (name, purpose) in RequiredIndexes)
         {
             var hasIndex = await conn.ExecuteScalarAsync<bool>(
@@ -119,35 +164,5 @@ public static class SchemaGuard
                 log.LogWarning("Index {Index} is missing ({Purpose}). Re-run the schema to add it.",
                                name, purpose);
         }
-
-        var missing = await MissingAsync(conn);
-        if (missing.Count == 0) return true;
-
-        if (autoApply)
-        {
-            log.LogWarning("Database is behind this build ({Missing}) — applying the schema.",
-                           string.Join("; ", missing));
-            await ApplyAsync(conn);
-
-            var still = await MissingAsync(conn);
-            if (still.Count == 0)
-            {
-                log.LogInformation("Schema applied; database is up to date.");
-                return true;
-            }
-            log.LogCritical("Applying the schema did not add: {Missing}", string.Join("; ", still));
-            return false;
-        }
-
-        var nl = Environment.NewLine;
-        log.LogCritical(
-            "This build needs database changes that are not there yet: {Missing}." + nl +
-            "Apply them once — the file is idempotent, so it is safe on a live database " +
-            "and keeps every existing comment:" + nl +
-            "    psql -U postgres -d qlik_collaboration -f database/schema.sql" + nl +
-            "Or set Database:ApplySchemaOnStart=true (env: Database__ApplySchemaOnStart=true) " +
-            "to let the API apply it itself at startup.",
-            string.Join("; ", missing));
-        return false;
     }
 }

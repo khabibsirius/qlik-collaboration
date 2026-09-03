@@ -374,6 +374,30 @@
     letter-spacing: .2px;
   }
 
+
+  /* ---------- who can read ----------
+     A discussion is private unless someone says otherwise, so this screen has to make
+     the exception visible at a glance rather than by reading a dropdown: the public
+     rows carry the brand colour, everything else stays quiet. */
+  .vis-app { border-top: 1px solid var(--hair); padding: 7px 0; }
+  .vis-app:first-of-type { border-top: 0; }
+  .vis-row { display: flex; align-items: center; gap: 8px; }
+  .vis-main { flex: 1; min-width: 0; }
+  .vis-name {
+    font-weight: 600; font-size: 12.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .vis-sub { font-size: 11px; color: var(--muted); }
+  .vis-sheet { padding: 5px 0 0 12px; }
+  .vis-sheet .vis-name { font-weight: 400; font-size: 12px; }
+  .vis-pick {
+    flex: none;
+    border: 1px solid var(--hair); background: var(--card); color: var(--ink-2);
+    border-radius: 20px; padding: 3px 6px; font: inherit; font-size: 11.5px; cursor: pointer;
+  }
+  .vis-pick:disabled { cursor: default; opacity: .6; }
+  .vis-public { border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
+
 </style>
 </head>
 <body>
@@ -409,6 +433,9 @@
       <button id="collapseSide" type="button">hide</button>
     </div>
     <div class="panel" id="people"></div>
+
+    <div class="section-label queue-head" style="margin-top:14px"><span>Who can read</span></div>
+    <div class="panel" id="privacy"></div>
   </aside>
 
   <main class="main">
@@ -935,13 +962,125 @@
       "</div>";
   }
 
+  // ---------- who can read ----------
+  //
+  // Private is the default and needs no row in the database, so "Private" on an app
+  // is expressed by deleting its row rather than storing a negative one. The effect
+  // is identical and it keeps the table to the exceptions, which is what makes the
+  // question "what is public?" answerable at all.
+  var privacy = [];
+
+  function loadPrivacy() {
+    return fetch("/api/visibility")
+      .then(function (r) { return r.json(); })
+      .then(function (list) { privacy = list || []; renderPrivacy(); })
+      .catch(function () { showError("Could not load who can read what."); });
+  }
+
+  function visOpt(value, current, label) {
+    return '<option value="' + value + '"' + (current === value ? " selected" : "") + ">" +
+           esc(label) + "</option>";
+  }
+
+  function renderPrivacy() {
+    var amAdmin = myRole() === "admin";
+
+    var html = privacy.map(function (a) {
+      var appSetting = a.setting === "public" ? "public" : "private";
+
+      var sheets = a.sheets.map(function (sh) {
+        var follows = a.effective ? "follows the app — public" : "follows the app — private";
+        return '<div class="vis-row vis-sheet">' +
+            '<div class="vis-main">' +
+              '<div class="vis-name" title="' + esc(sh.sheetId) + '">' +
+                esc(sh.sheetName || sh.sheetId) + "</div>" +
+              '<div class="vis-sub">' + sh.comments + (sh.comments === 1 ? " comment" : " comments") +
+                " · " + esc(sh.setting === "inherit" ? follows : "set by " + (sh.setBy || "?")) + "</div>" +
+            "</div>" +
+            '<select class="vis-pick' + (sh.effective ? " vis-public" : "") + '"' +
+              ' data-app="' + esc(a.appId) + '" data-sheet="' + esc(sh.sheetId) + '"' +
+              (amAdmin ? "" : " disabled") + ">" +
+              visOpt("inherit", sh.setting, a.effective ? "Follow app (public)" : "Follow app (private)") +
+              visOpt("public", sh.setting, "Public") +
+              visOpt("private", sh.setting, "Private") +
+            "</select>" +
+          "</div>";
+      }).join("");
+
+      return '<div class="vis-app">' +
+          '<div class="vis-row">' +
+            '<div class="vis-main">' +
+              '<div class="vis-name" title="' + esc(a.appId) + '">' +
+                esc(a.appName || a.appId) + "</div>" +
+              '<div class="vis-sub">' + a.comments + (a.comments === 1 ? " comment" : " comments") +
+                (a.setBy ? " · set by " + esc(a.setBy) : "") + "</div>" +
+            "</div>" +
+            '<select class="vis-pick' + (a.effective ? " vis-public" : "") + '"' +
+              ' data-app="' + esc(a.appId) + '"' + (amAdmin ? "" : " disabled") + ">" +
+              visOpt("public", appSetting, "Public") +
+              visOpt("private", appSetting, "Private") +
+            "</select>" +
+          "</div>" + sheets +
+        "</div>";
+    }).join("");
+
+    $("privacy").innerHTML =
+      (html || '<div class="vis-sub">Nobody has commented on anything yet.</div>') +
+      '<div class="note">' +
+        "<b>Private</b> — each person sees only the threads they started; the BI team " +
+        "sees all of them.<br/>" +
+        "<b>Public</b> — everyone who can open the sheet sees the whole discussion, " +
+        "and can mention colleagues with @.<br/><br/>" +
+        "A sheet may differ from its app: set the app once, then make the exceptions." +
+        (amAdmin ? "" : "<br/><br/>Only an admin can change this.") +
+      "</div>";
+  }
+
+  $("privacy").addEventListener("change", function (e) {
+    var sel = e.target.closest(".vis-pick");
+    if (!sel) return;
+
+    var appId = sel.getAttribute("data-app");
+    var sheetId = sel.getAttribute("data-sheet");     // absent on the app row
+    var value = sel.value;
+    var done;
+
+    // "Follow app" for a sheet, and "Private" for an app, both mean "have no row here".
+    if (value === "inherit" || (value === "private" && !sheetId)) {
+      done = fetch("/api/visibility?appId=" + encodeURIComponent(appId) +
+                   (sheetId ? "&sheetId=" + encodeURIComponent(sheetId) : "") +
+                   "&by=" + encodeURIComponent(me), { method: "DELETE" });
+    } else {
+      done = fetch("/api/visibility", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appId: appId,
+          sheetId: sheetId || null,
+          isPublic: value === "public",
+          by: me
+        })
+      });
+    }
+
+    done.then(function (r) {
+      // 404 from the delete means there was nothing to remove, which is the state
+      // being asked for anyway.
+      if (r.ok || r.status === 404) return loadPrivacy();
+      return r.json().then(function (b) { throw new Error((b && b.error) || "server said " + r.status); });
+    }).catch(function (err) {
+      showError("Could not change who can read this: " + (err && err.message));
+      loadPrivacy();                       // put the dropdown back to the truth
+    });
+  });
+
   // Hiding it gives the whole width to the queue; the way back is in the header, so a
   // hidden sidebar is never a hidden feature.
   function setSide(open) {
     $("wrap").classList.toggle("no-side", !open);
     $("showSide").style.display = open ? "none" : "";
     try { localStorage.setItem("qlikCollab.side", open ? "1" : "0"); } catch (e) { /* noop */ }
-    if (open) loadPeople();
+    if (open) { loadPeople(); loadPrivacy(); }
   }
   $("collapseSide").addEventListener("click", function () { setSide(false); });
   $("showSide").addEventListener("click", function () { setSide(true); });
@@ -969,6 +1108,7 @@
       me = e.target.value.trim();
       try { localStorage.setItem("qlikCollab.admin", me); } catch (e2) { /* private mode */ }
       renderPeople();
+      renderPrivacy();
       render();     // who you are decides whether the queue offers delete at all
     }
   });
