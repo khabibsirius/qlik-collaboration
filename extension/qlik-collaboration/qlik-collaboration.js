@@ -26,7 +26,20 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
 
   // Shown in the panel header and logged at startup, so it is always obvious which
   // build is actually running — browser and server caches make that easy to get wrong.
-  var EXT_VERSION = "0.15.1";
+  var EXT_VERSION = "0.15.2";
+
+  // The mark on the collapsed bubble, inlined rather than shipped as an image file.
+  // package-extension.ps1 copies four named files into the QMC archive, so a fifth
+  // asset would be missing from exactly the build that goes to Enterprise — and the
+  // bubble would show a broken image on the server while looking right on Desktop.
+  // Inline SVG also stays sharp at every size and costs no second request.
+  var BUBBLE_LOGO =
+    '<svg class="qcol-logo" viewBox="0 0 100 100" aria-hidden="true" focusable="false">' +
+      '<g fill="none" stroke-width="13">' +
+        '<path stroke="#5b5e63" d="M67 79.44 A34 34 0 0 1 20.56 33"/>' +
+        '<path stroke="#009845" d="M20.56 33 A34 34 0 1 1 67 79.44"/>' +
+        '<path stroke="#009845" d="M68 68 L88.5 88.5"/>' +
+      "</g></svg>";
 
   // The backend address is typed by hand into the property panel, and pasting it out
   // of a browser bar brings a trailing slash with it. Left alone, every call then goes
@@ -264,7 +277,7 @@ define(["qlik", "jquery", "./signalr.min", "css!./qlik-collaboration.css"], func
         '    <span class="qcol-greet-text"></span><span class="qcol-greet-unread"></span>' +
         '  </span>' +
         '  <button class="qcol-bubble">' +
-        '    <span class="qcol-bubble-icon">💬</span>' +
+        '    <span class="qcol-bubble-icon">' + BUBBLE_LOGO + "</span>" +
         '    <span class="qcol-bubble-badge" style="display:none"></span>' +
         '  </button>' +
         '  <div class="qcol-header">' +
